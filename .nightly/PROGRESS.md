@@ -20,7 +20,7 @@ Repo: `C:\dev\godwatch`
 - Tranche / slice: T1 spatial contracts and lazy local map skeleton
 - Status: DONE
 - Tests: npm run check -> PASS
-- Commit: 7f9cf7b pushed: pending
+- Commit: 7f9cf7b pushed: yes (`origin/nightly/godwatch-legibility`); progress note commit 7699755
 - Files touched: `.nightly/PROGRESS.md`, `src/sim/types.ts`, `src/sim/world/spatial.ts`, `src/sim/world/localTerrain.ts`, `src/sim/world/localMap.ts`, `src/sim/world/buildings.ts`, `scripts/micro-scenarios-entry.ts`
 - Next run: Start T2 with a narrow render snapshot selector before moving canvas layer code.
 - Blockers: none.
