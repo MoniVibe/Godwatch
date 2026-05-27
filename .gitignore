@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.micro-scenarios/
+.codex/
+animation-captures/
+vite.*.log
+vite.log
+*.pid
+godwatch-*.png
+figma-godwatch-*.png

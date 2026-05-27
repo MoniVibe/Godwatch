@@ -1,0 +1,19 @@
+{
+  "name": "godwatch",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "npm run test:smoke && npm run test:scenarios",
+    "test:smoke": "node scripts/run-sim-smoke.mjs",
+    "test:scenarios": "node scripts/run-micro-scenarios.mjs",
+    "check": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
