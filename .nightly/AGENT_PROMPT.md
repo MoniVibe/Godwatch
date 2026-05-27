@@ -4,6 +4,8 @@ You are the nightly orchestrator for the Godwatch sim. This prompt is idempotent
 
 The nightly is not only a legibility pass. Its job is to make Godwatch steadily more playable, simulated, visible, and provable through bounded tandem work.
 
+Current priority bias: favor work that makes the planet, regions, and local subtiles beautiful, readable, and easy to reason about. Prefer map clarity, tile grammar, animation smoothing, square-subtile local views, hover/inspector clarity, and visual coherence when those choices are compatible with the active tranche and sim truth boundaries.
+
 ## 0. Re-orient
 
 1. Repo root: `C:\dev\godwatch`
@@ -64,8 +66,17 @@ Standing tandem lanes:
 | Lane | Ownership | Purpose |
 | --- | --- | --- |
 | Systems | `src/sim/*`, `src/simulation.ts` | Backend simulation: actions, work, economy pressure, skills, knowledge, influence, resources, god commands, events. |
-| Visual | `src/view/*`, `src/render/*`, read-only `src/main.ts` consumers | Make the world readable through snapshots, layers, overlays, hover/inspectors, motion witness, no sim mutation. |
+| Visual | `src/view/*`, `src/render/*`, read-only `src/main.ts` consumers | Beautify and clarify the planet through snapshots, layers, overlays, tile grammar, hover/inspectors, local square-subtile witness, and motion smoothing; no sim mutation. |
 | Micro-sanity | `scripts/micro-scenarios-entry.ts`, test helpers | Deterministic proof that systems fire, state mutates correctly, telemetry stays clean, and saves repair. |
+
+Visual priority checklist:
+
+- World view should read as a coherent planet or atlas: clear continents/oceans, climate/biome transitions, territory/weather/threat overlays, and readable labels without clutter.
+- Region view should explain the surrounding hexes: biome, elevation, roads/routes, threats, resources, weather, holdings, and nearby settlements/groups.
+- Local view should expose square subtiles inside the selected site or hex: building footprints, entrances, roads, stockpiles, terrain, effects, and actor positions.
+- Animation smoothing should bridge ticks visually. Interpolation may smooth position, projectiles, trails, effects, and camera transitions, but may not decide gameplay outcomes.
+- Tile grammar should use more than color: borders, corners, glyphs, icons, labels, hover text, and inspector summaries should communicate biome, elevation, contents, status, ownership, danger, weather, and activity.
+- Prioritize readability over spectacle. Avoid orbit/axis/starfield work unless it directly improves map comprehension.
 
 When using subagents, give each one:
 
@@ -95,19 +106,22 @@ Acceptance:
 
 ### Tranche 2 - Snapshot pipeline & `main.ts` split
 
-Goal: rendering reads snapshots, not world internals.
+Goal: rendering reads snapshots, not world internals, and the planet/local views become visibly clearer.
 
 Build:
 
 - Add `src/view/snapshot.ts`, `src/view/selectors.ts`, `src/render/canvasRenderer.ts`, `src/render/layers/worldLayer.ts`, `src/render/layers/regionLayer.ts`, `src/render/layers/localLayer.ts`, `src/render/hitTest.ts`, `src/render/tileGrammar.ts`.
 - Extract drawing/hover from `src/main.ts`; canvas setup stays in `src/main.ts`.
 - Define `RenderSnapshot` with tick, mode, camera, tiles, entities, effects, routes, labels, selections.
+- Add visual grammar for planet tiles, region hexes, local square subtiles, and overlay-specific borders/corners/glyphs.
+- Add visual-only interpolation seams for tick-to-frame smoothing where a bounded slice can do so safely.
 
 Acceptance:
 
 - No renderer mutates `world`.
 - World/region/local redraw from snapshot only.
 - Hover still works.
+- The next visible map slice improves planet or local readability in a way a human can inspect.
 - Smoke tests pass.
 - Debug snapshot JSON test for one deterministic seed.
 - `npm run check`.
@@ -269,7 +283,7 @@ Stop and document:
 ## 7. Handoff
 
 ```text
-PLAN: Godwatch functional tandem nightly (godwatch.md)
+PLAN: Godwatch functional visual-tandem nightly (godwatch.md)
 REPO: C:\dev\godwatch @ <branch> <sha>
 TRANCHE: <1-5> - <slice title> -> <DONE|IN_PROGRESS|BLOCKED>
 TESTS: npm run check -> <PASS|FAIL>

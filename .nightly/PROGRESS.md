@@ -8,12 +8,23 @@ Repo: `C:\dev\godwatch`
 | Tranche | Status | Notes |
 | --- | --- | --- |
 | T1 Spatial contracts & local map skeleton | DONE | Added parseable local tile IDs, settlement-local-map metadata, in-bounds footprint repair, and deterministic micro-scenario. |
-| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | Pure render snapshot selector, first `main.ts` map consumer, snapshot-backed band draw/hit-test, camera state, local footprint data, and deterministic snapshot proof are in place; nightly now runs functional tandem lanes. |
+| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | Pure render snapshot selector, first `main.ts` map consumer, snapshot-backed band draw/hit-test, camera state, local footprint data, and deterministic snapshot proof are in place; nightly now prioritizes planet readability, visual tile grammar, animation smoothing, and square-subtile local clarity. |
 | T3 Work orders, reservations, visible haul/build | TODO | Blocked until T2 acceptance is complete. |
 | T4 Interpolation, combat readability, skills | TODO | Blocked until T3 acceptance is complete. |
 | T5 God command bus + first economy pressure | TODO | Blocked until T4 acceptance is complete. |
 
 ## Runs
+
+## Run 2026-05-27T23:42:18Z
+- Branch / HEAD: nightly/godwatch-legibility / 97ceb59
+- Tranche / slice: Nightly priority biased toward planet beautification, readability, smoothing, and local square subtiles
+- Status: DONE
+- Tests: npm run check -> PASS
+- Commit: pending pushed: no
+- Lanes: systems=none, visual=done, micro=none
+- Files touched: `.nightly/AGENT_PROMPT.md`, `.nightly/PROGRESS.md`
+- Next run: Continue T2 with visual-first work: tile grammar, clearer planet/region/local rendering, animation smoothing seams, or square-subtile local readability before broader backend expansion.
+- Blockers: none.
 
 ## Run 2026-05-27T23:35:37Z
 - Branch / HEAD: nightly/godwatch-legibility / 2b91a8a
