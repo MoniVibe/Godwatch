@@ -20,7 +20,7 @@ Repo: `C:\dev\godwatch`
 - Tranche / slice: Nightly priority biased toward planet beautification, readability, smoothing, and local square subtiles
 - Status: DONE
 - Tests: npm run check -> PASS
-- Commit: 0efc5b0 pushed: pending (progress note commit pending)
+- Commit: 0efc5b0 pushed: yes (`origin/nightly/godwatch-legibility`); progress note commit 5d112f9
 - Lanes: systems=none, visual=done, micro=none
 - Files touched: `.nightly/AGENT_PROMPT.md`, `.nightly/PROGRESS.md`
 - Next run: Continue T2 with visual-first work: tile grammar, clearer planet/region/local rendering, animation smoothing seams, or square-subtile local readability before broader backend expansion.
