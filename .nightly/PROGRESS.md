@@ -1,4 +1,4 @@
-# Godwatch Legibility Nightly Progress
+# Godwatch Functional Tandem Nightly Progress
 
 Plan source: `C:\dev\plans\godwatch.md`
 Repo: `C:\dev\godwatch`
@@ -8,12 +8,22 @@ Repo: `C:\dev\godwatch`
 | Tranche | Status | Notes |
 | --- | --- | --- |
 | T1 Spatial contracts & local map skeleton | DONE | Added parseable local tile IDs, settlement-local-map metadata, in-bounds footprint repair, and deterministic micro-scenario. |
-| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | Pure render snapshot selector, first `main.ts` map consumer, camera state, local footprint data, and deterministic snapshot proof are in place. |
+| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | Pure render snapshot selector, first `main.ts` map consumer, camera state, local footprint data, and deterministic snapshot proof are in place; nightly now runs functional tandem lanes. |
 | T3 Work orders, reservations, visible haul/build | TODO | Blocked until T2 acceptance is complete. |
 | T4 Interpolation, combat readability, skills | TODO | Blocked until T3 acceptance is complete. |
 | T5 God command bus + first economy pressure | TODO | Blocked until T4 acceptance is complete. |
 
 ## Runs
+
+## Run 2026-05-27T23:31:00Z
+- Branch / HEAD: nightly/godwatch-legibility / 65ede1e
+- Tranche / slice: Nightly prompt broadened from legibility to functional tandem development
+- Status: DONE
+- Tests: npm run check -> PASS
+- Commit: pending pushed: no
+- Files touched: `.nightly/AGENT_PROMPT.md`, `.nightly/PROGRESS.md`
+- Next run: Continue T2 with tandem lanes: visual worker unifies band projection/hit-test around snapshots while micro-sanity adds a focused snapshot/hit-test proof if practical.
+- Blockers: none.
 
 ## Run 2026-05-27T23:17:05Z
 - Branch / HEAD: nightly/godwatch-legibility / fa3766b

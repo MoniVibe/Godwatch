@@ -1,6 +1,8 @@
-# Nightly cycle - Godwatch legibility
+# Nightly cycle - Godwatch functional tandem development
 
-You are a bounded implementation agent for the Godwatch sim. This prompt is idempotent: run it many times tonight; each run leaves the tree test-green, or documents a blocker, and updates the progress checkpoint.
+You are the nightly orchestrator for the Godwatch sim. This prompt is idempotent: run it many times tonight; each run leaves the tree test-green, or documents a blocker, and updates the progress checkpoint.
+
+The nightly is not only a legibility pass. Its job is to make Godwatch steadily more playable, simulated, visible, and provable through bounded tandem work.
 
 ## 0. Re-orient
 
@@ -30,13 +32,14 @@ Commit and push every successful slice. If no `origin` exists, commit locally an
 
 ## 1. Mission
 
-Make Godwatch legible: actors at positions, actors doing work, work changing tiles, tiles explaining themselves, and renderer witnessing truth rather than inventing gameplay.
+Make Godwatch functional and legible: actors at positions, actors doing work, work changing tiles, societies creating pressure, entities learning and fighting, god tools acting through explicit commands, tiles explaining themselves, and renderer witnessing truth rather than inventing gameplay.
 
 Core law:
 
 - Simulation stores semantic coordinates: planet hex and local square, never pixel coords in sim state.
 - Backend is authoritative. Renderer/interpolation never decides movement, harvest, build, death, or combat outcomes.
 - Cut seams into the existing codebase; do not rewrite the app.
+- Every visible feature should have a backend truth source, a visual witness when practical, and a micro-sanity proof when risk is non-trivial.
 
 Target loop:
 
@@ -46,7 +49,30 @@ Input / god command queue -> validate -> apply at tick -> advance truth -> repai
 
 ## 2. Backlog
 
-Strict order. Pick the lowest-numbered tranche not fully `DONE`; finish the smallest shippable vertical slice. Mark each sub-item in `PROGRESS.md` as `TODO`, `IN_PROGRESS`, `DONE`, or `BLOCKED`.
+Foundation order still matters. Pick the lowest-numbered tranche not fully `DONE`; finish the smallest shippable vertical slice. Mark each sub-item in `PROGRESS.md` as `TODO`, `IN_PROGRESS`, `DONE`, or `BLOCKED`.
+
+Tandem work is allowed inside that constraint:
+
+- The orchestrator owns integration and final validation.
+- Use subagents in tandem when their write scopes are disjoint and their outputs can be integrated safely.
+- Route systems changes through micro-sanity proof in the same run whenever feasible.
+- Visual work may proceed in parallel only as a witness of existing or newly landed simulation truth.
+- Do not start a later authoritative feature that depends on an incomplete earlier tranche. Exploratory scouts, tests, prompt/checkpoint upkeep, and render-only witness work are allowed if they do not destabilize the current tranche.
+
+Standing tandem lanes:
+
+| Lane | Ownership | Purpose |
+| --- | --- | --- |
+| Systems | `src/sim/*`, `src/simulation.ts` | Backend simulation: actions, work, economy pressure, skills, knowledge, influence, resources, god commands, events. |
+| Visual | `src/view/*`, `src/render/*`, read-only `src/main.ts` consumers | Make the world readable through snapshots, layers, overlays, hover/inspectors, motion witness, no sim mutation. |
+| Micro-sanity | `scripts/micro-scenarios-entry.ts`, test helpers | Deterministic proof that systems fire, state mutates correctly, telemetry stays clean, and saves repair. |
+
+When using subagents, give each one:
+
+- A concrete lane and file ownership.
+- A clear acceptance check.
+- A warning that other agents may be editing nearby files and they must not revert unrelated work.
+- A request to leave changes uncommitted for orchestrator review unless explicitly told otherwise.
 
 ### Tranche 1 - Spatial contracts & local map skeleton
 
@@ -185,6 +211,7 @@ Forbidden for now:
 - Screenshots driving sim truth.
 - Bulk non-CC0 art without manifest.
 - Broad unrelated refactors or `main.ts` rewrite-in-place.
+- Single-agent monolith slices when the work naturally splits into systems, visual witness, and micro-sanity proof.
 
 ## 4. Test
 
@@ -242,11 +269,12 @@ Stop and document:
 ## 7. Handoff
 
 ```text
-PLAN: Godwatch legibility (godwatch.md)
+PLAN: Godwatch functional tandem nightly (godwatch.md)
 REPO: C:\dev\godwatch @ <branch> <sha>
 TRANCHE: <1-5> - <slice title> -> <DONE|IN_PROGRESS|BLOCKED>
 TESTS: npm run check -> <PASS|FAIL>
 COMMIT: <sha|none> pushed: <yes|no>
+LANES: systems=<done|none|blocked>, visual=<done|none|blocked>, micro=<done|none|blocked>
 NEXT: <one sentence>
 BLOCKERS: <none|list>
 ```
