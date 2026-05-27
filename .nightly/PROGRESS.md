@@ -20,7 +20,7 @@ Repo: `C:\dev\godwatch`
 - Tranche / slice: T2 aligned world hex ground projection
 - Status: DONE
 - Tests: npm run check -> PASS
-- Commit: 43435a5 pushed: pending (progress note commit pending)
+- Commit: 43435a5 pushed: yes (`origin/nightly/godwatch-legibility`); progress note commit 80df7f9
 - Lanes: systems=none, visual=done, micro=none
 - Files touched: `.nightly/PROGRESS.md`, `src/main.ts`
 - Next run: Continue planet readability by filling more of the globe with generated sectors, improving local square-subtile rendering, or extracting tile grammar into `src/render/*`.
