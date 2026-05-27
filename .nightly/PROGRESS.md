@@ -20,7 +20,7 @@ Repo: `C:\dev\godwatch`
 - Tranche / slice: T2 snapshot-backed band projection and hit-test
 - Status: DONE
 - Tests: npm run check -> PASS
-- Commit: 87c6dc0 pushed: pending (progress note commit pending)
+- Commit: 87c6dc0 pushed: yes (`origin/nightly/godwatch-legibility`); progress note commit 6632364
 - Lanes: systems=none, visual=done, micro=done
 - Files touched: `.nightly/PROGRESS.md`, `src/main.ts`, `scripts/micro-scenarios-entry.ts`
 - Next run: Continue T2 by extracting a small pure render/hit-test module or moving hover/tile grammar into `src/render/*` without changing sim truth.
