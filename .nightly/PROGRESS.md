@@ -20,7 +20,7 @@ Repo: `C:\dev\godwatch`
 - Tranche / slice: T2 pure render snapshot foundation
 - Status: DONE
 - Tests: npm run check -> PASS
-- Commit: pending pushed: no
+- Commit: 36047ae pushed: pending (progress note commit pending)
 - Files touched: `.nightly/PROGRESS.md`, `src/view/selectors.ts`, `src/view/snapshot.ts`, `scripts/micro-scenarios-entry.ts`
 - Next run: Keep T2 in progress by making the first snapshot consumer in `src/main.ts`, preferably atlas/hover or band position rendering before click mutation.
 - Blockers: none.
