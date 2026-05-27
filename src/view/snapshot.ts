@@ -1,9 +1,11 @@
-import { collectOccupancySnapshot, type EntityPositionSnapshot, type OccupancyBucket } from "../sim/world/occupancy";
+import { collectOccupancySnapshot, type EntityPositionSnapshot, type OccupancyBucket, type WorldOccupancySnapshot } from "../sim/world/occupancy";
 import type {
   Id,
   LingeringEffect,
+  MediumLayer,
   Settlement,
   SettlementBuilding,
+  SettlementBuildingFootprint,
   SettlementLocalMap,
   TravelRoute,
   World,
@@ -31,6 +33,11 @@ export interface RenderCameraSnapshot {
   mode: RenderMode;
   overlay: RenderOverlay;
   selectedSettlementId: Id;
+  targetSectorId?: Id;
+  x: number;
+  y: number;
+  zoom: number;
+  layer: MediumLayer;
 }
 
 export interface RenderSelectionSnapshot {
@@ -43,11 +50,23 @@ export interface LocalSettlementSnapshot {
   settlementId: Id;
   map?: SettlementLocalMap;
   buildings: SettlementBuilding[];
+  buildingFootprints: LocalBuildingFootprintSnapshot[];
+  occupiedTileIds: Id[];
+}
+
+export interface LocalBuildingFootprintSnapshot {
+  buildingId: Id;
+  catalogId: SettlementBuilding["catalogId"];
+  name: string;
+  status: SettlementBuilding["status"];
+  occupantIds: Id[];
+  footprint: SettlementBuildingFootprint;
 }
 
 export interface RenderSnapshot {
   tick: number;
   day: number;
+  mode: RenderMode;
   camera: RenderCameraSnapshot;
   selections: RenderSelectionSnapshot;
   settlements: Settlement[];
@@ -56,6 +75,7 @@ export interface RenderSnapshot {
   routes: TravelRoute[];
   entities: EntityPositionSnapshot[];
   occupancyBuckets: OccupancyBucket[];
+  occupancy: WorldOccupancySnapshot;
   effects: LingeringEffect[];
   local?: LocalSettlementSnapshot;
 }
@@ -63,8 +83,80 @@ export interface RenderSnapshot {
 export interface RenderSnapshotOptions extends SnapshotSelectionInput {
   mode?: RenderMode;
   overlay?: RenderOverlay;
+  camera?: Partial<Pick<RenderCameraSnapshot, "x" | "y" | "zoom" | "layer" | "targetSectorId" | "selectedSettlementId">>;
   regionRadius?: number;
   includeEffects?: boolean;
+}
+
+function finiteNumber(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) ? (value as number) : fallback;
+}
+
+function normalized(value: number | undefined, fallback: number): number {
+  return Math.max(0, Math.min(1, finiteNumber(value, fallback)));
+}
+
+function zoomForMode(mode: RenderMode): number {
+  if (mode === "local") {
+    return 6;
+  }
+  if (mode === "region") {
+    return 2.5;
+  }
+  return 1;
+}
+
+function cameraFor(world: World, mode: RenderMode, overlay: RenderOverlay, settlement: Settlement, input?: RenderSnapshotOptions["camera"]): RenderCameraSnapshot {
+  const targetSettlement = input?.selectedSettlementId ? (world.settlements[input.selectedSettlementId] ?? settlement) : settlement;
+  return {
+    mode,
+    overlay,
+    selectedSettlementId: targetSettlement.id,
+    targetSectorId: input?.targetSectorId ?? targetSettlement.sectorId,
+    x: normalized(input?.x, targetSettlement.x),
+    y: normalized(input?.y, targetSettlement.y),
+    zoom: Math.max(0.001, finiteNumber(input?.zoom, zoomForMode(mode))),
+    layer: input?.layer ?? targetSettlement.localMap?.layer ?? "surface"
+  };
+}
+
+function copiedFootprint(footprint: SettlementBuildingFootprint): SettlementBuildingFootprint {
+  return {
+    tileIds: [...footprint.tileIds],
+    width: footprint.width,
+    height: footprint.height,
+    anchorQ: footprint.anchorQ,
+    anchorR: footprint.anchorR,
+    layer: footprint.layer
+  };
+}
+
+function buildingFootprintsForSettlement(settlement: Settlement): LocalBuildingFootprintSnapshot[] {
+  return buildingsForSettlement(settlement)
+    .filter((building) => Boolean(building.footprint))
+    .map((building) => ({
+      buildingId: building.id,
+      catalogId: building.catalogId,
+      name: building.name,
+      status: building.status,
+      occupantIds: [...(building.occupantIds ?? [])],
+      footprint: copiedFootprint(building.footprint as SettlementBuildingFootprint)
+    }));
+}
+
+function localSnapshotForSettlement(settlement: Settlement): LocalSettlementSnapshot | undefined {
+  const map = localMapForSettlement(settlement);
+  const buildingFootprints = buildingFootprintsForSettlement(settlement);
+  if (!map && buildingFootprints.length === 0) {
+    return undefined;
+  }
+  return {
+    settlementId: settlement.id,
+    map,
+    buildings: buildingsForSettlement(settlement),
+    buildingFootprints,
+    occupiedTileIds: [...new Set(buildingFootprints.flatMap((building) => building.footprint.tileIds))]
+  };
 }
 
 export function createRenderSnapshot(world: World, options: RenderSnapshotOptions = {}): RenderSnapshot {
@@ -80,11 +172,8 @@ export function createRenderSnapshot(world: World, options: RenderSnapshotOption
   return {
     tick: world.tick,
     day: world.day,
-    camera: {
-      mode,
-      overlay,
-      selectedSettlementId: selectedSettlement.id
-    },
+    mode,
+    camera: cameraFor(world, mode, overlay, selectedSettlement, options.camera),
     selections: {
       settlementId: selectedSettlement.id,
       bandId: selectedBandId,
@@ -96,15 +185,9 @@ export function createRenderSnapshot(world: World, options: RenderSnapshotOption
     routes: routesForSettlement(world, mode === "world" ? undefined : selectedSettlement),
     entities: occupancy.entries,
     occupancyBuckets: occupancy.buckets,
+    occupancy,
     effects: activeEffectsFor(world),
-    local:
-      mode === "local"
-        ? {
-            settlementId: selectedSettlement.id,
-            map: localMapForSettlement(selectedSettlement),
-            buildings: buildingsForSettlement(selectedSettlement)
-          }
-        : undefined
+    local: localSnapshotForSettlement(selectedSettlement)
   };
 }
 

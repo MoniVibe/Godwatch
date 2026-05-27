@@ -8,7 +8,7 @@ Repo: `C:\dev\godwatch`
 | Tranche | Status | Notes |
 | --- | --- | --- |
 | T1 Spatial contracts & local map skeleton | DONE | Added parseable local tile IDs, settlement-local-map metadata, in-bounds footprint repair, and deterministic micro-scenario. |
-| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | First slice active: pure render snapshot selector and deterministic snapshot proof. |
+| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | Pure render snapshot selector, camera state, local footprint data, and deterministic snapshot proof are in place. |
 | T3 Work orders, reservations, visible haul/build | TODO | Blocked until T2 acceptance is complete. |
 | T4 Interpolation, combat readability, skills | TODO | Blocked until T3 acceptance is complete. |
 | T5 God command bus + first economy pressure | TODO | Blocked until T4 acceptance is complete. |
@@ -22,6 +22,7 @@ Repo: `C:\dev\godwatch`
 - Tests: npm run check -> PASS
 - Commit: 36047ae pushed: yes (`origin/nightly/godwatch-legibility`); progress note commit ddd730a
 - Files touched: `.nightly/PROGRESS.md`, `src/view/selectors.ts`, `src/view/snapshot.ts`, `scripts/micro-scenarios-entry.ts`
+- Follow-up: Worker snapshot refinement added camera target/zoom/layer, full occupancy payload, local building footprints, and occupied local tile IDs; npm run check -> PASS.
 - Next run: Keep T2 in progress by making the first snapshot consumer in `src/main.ts`, preferably atlas/hover or band position rendering before click mutation.
 - Blockers: none.
 

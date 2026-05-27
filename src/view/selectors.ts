@@ -15,6 +15,7 @@ export type RenderOverlay = "biomes" | "elevation" | "threat" | "political";
 
 export interface SnapshotSelectionInput {
   selectedSettlementId?: Id;
+  selectedMapSettlementId?: Id;
   selectedBandId?: Id;
   selectedPersonId?: Id;
 }
@@ -29,9 +30,10 @@ export function selectedPersonIdFor(world: World, input: SnapshotSelectionInput 
 
 export function selectedSettlementFor(world: World, input: SnapshotSelectionInput = {}): Settlement {
   const selectedBand = world.bands[selectedBandIdFor(world, input)];
+  const selectedSettlementId = input.selectedSettlementId ?? input.selectedMapSettlementId;
   const fallbackId = selectedBand?.travel?.destinationId ?? selectedBand?.locationId;
   return (
-    (input.selectedSettlementId ? world.settlements[input.selectedSettlementId] : undefined) ??
+    (selectedSettlementId ? world.settlements[selectedSettlementId] : undefined) ??
     (fallbackId ? world.settlements[fallbackId] : undefined) ??
     Object.values(world.settlements).sort((left, right) => left.id.localeCompare(right.id))[0]
   );
