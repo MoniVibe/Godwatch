@@ -8,12 +8,22 @@ Repo: `C:\dev\godwatch`
 | Tranche | Status | Notes |
 | --- | --- | --- |
 | T1 Spatial contracts & local map skeleton | DONE | Added parseable local tile IDs, settlement-local-map metadata, in-bounds footprint repair, and deterministic micro-scenario. |
-| T2 Snapshot pipeline & `main.ts` split | TODO | Next: introduce render snapshots and start extracting canvas layers from `src/main.ts`. |
+| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | First slice active: pure render snapshot selector and deterministic snapshot proof. |
 | T3 Work orders, reservations, visible haul/build | TODO | Blocked until T2 acceptance is complete. |
 | T4 Interpolation, combat readability, skills | TODO | Blocked until T3 acceptance is complete. |
 | T5 God command bus + first economy pressure | TODO | Blocked until T4 acceptance is complete. |
 
 ## Runs
+
+## Run 2026-05-27T23:01:16Z
+- Branch / HEAD: nightly/godwatch-legibility / 1d96791
+- Tranche / slice: T2 pure render snapshot foundation
+- Status: DONE
+- Tests: npm run check -> PASS
+- Commit: pending pushed: no
+- Files touched: `.nightly/PROGRESS.md`, `src/view/selectors.ts`, `src/view/snapshot.ts`, `scripts/micro-scenarios-entry.ts`
+- Next run: Keep T2 in progress by making the first snapshot consumer in `src/main.ts`, preferably atlas/hover or band position rendering before click mutation.
+- Blockers: none.
 
 ## Run 2026-05-27T22:36:00Z
 - Branch / HEAD: nightly/godwatch-legibility / e7cd87e

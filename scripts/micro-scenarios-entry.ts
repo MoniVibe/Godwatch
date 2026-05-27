@@ -19,6 +19,7 @@ import {
 } from "../src/sim/world/buildings";
 import { ensureLocalMapForSettlement, validLocalTileIdForMap } from "../src/sim/world/localMap";
 import { collectOccupancySnapshot } from "../src/sim/world/occupancy";
+import { createRenderSnapshot, snapshotDebugSummary } from "../src/view/snapshot";
 import type {
   AssetKind,
   Band,
@@ -440,6 +441,34 @@ results.push(
     assert(telemetry.invariantIssues.length === 0, `Expected telemetry-clean local map repair world:\n${telemetry.invariantIssues.join("\n")}`);
     assertValid(world, "settlement local map repair scenario");
     return `${settlement.name}: ${map.kind} ${map.width}x${map.height}; repaired ${person.name} to ${person.localTileId}`;
+  })
+);
+
+results.push(
+  scenario("render snapshot is read-only and deterministic", () => {
+    const world = createWorld("micro-render-snapshot-readonly");
+    const settlement = Object.values(world.settlements)[0];
+    assert(settlement, "Expected settlement fixture.");
+    ensureSettlementDevelopment(world);
+
+    const before = JSON.stringify(world);
+    const snapshot = createRenderSnapshot(world, { mode: "local", overlay: "biomes", selectedSettlementId: settlement.id });
+    const repeat = createRenderSnapshot(world, { mode: "local", overlay: "biomes", selectedSettlementId: settlement.id });
+    const after = JSON.stringify(world);
+
+    assert(after === before, "Expected render snapshot creation not to mutate world.");
+    assert(JSON.stringify(snapshotDebugSummary(snapshot)) === JSON.stringify(snapshotDebugSummary(repeat)), "Expected stable snapshot summary for the same world state.");
+    assert(snapshot.tick === world.tick && snapshot.day === world.day, "Expected snapshot clock to mirror world clock.");
+    assert(snapshot.camera.mode === "local" && snapshot.camera.overlay === "biomes", "Expected requested snapshot camera state.");
+    assert(snapshot.selections.settlementId === settlement.id, "Expected snapshot to preserve selected settlement.");
+    assert(snapshot.settlements.length === Object.keys(world.settlements).length, "Expected snapshot settlement list.");
+    assert(snapshot.local?.map?.settlementId === settlement.id, "Expected local snapshot map for selected settlement.");
+    assert((snapshot.local?.buildings.length ?? 0) === (settlement.buildings?.length ?? 0), "Expected local snapshot buildings.");
+    assert(snapshot.entities.some((entry) => entry.subjectKind === "settlement" && entry.subjectId === settlement.id), "Expected settlement occupancy in render snapshot.");
+    assert(snapshot.occupancyBuckets.length > 0, "Expected render snapshot occupancy buckets.");
+    assertValid(world, "render snapshot scenario");
+
+    return `snapshot ${snapshot.camera.mode}; settlements ${snapshot.settlements.length}; entities ${snapshot.entities.length}; local ${snapshot.local?.map?.width}x${snapshot.local?.map?.height}`;
   })
 );
 
