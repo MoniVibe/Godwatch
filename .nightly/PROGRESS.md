@@ -20,7 +20,7 @@ Repo: `C:\dev\godwatch`
 - Tranche / slice: T2 first `main.ts` render snapshot consumer
 - Status: DONE
 - Tests: npm run check -> PASS
-- Commit: 2c80524 pushed: pending (progress note commit pending)
+- Commit: 2c80524 pushed: yes (`origin/nightly/godwatch-legibility`); progress note commit e157bc2
 - Files touched: `.nightly/PROGRESS.md`, `src/main.ts`
 - Next run: Keep T2 in progress by unifying band projection, drawing, hover, and click hit-testing around one snapshot-backed helper.
 - Blockers: none.
