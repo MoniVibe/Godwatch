@@ -1803,10 +1803,20 @@ interface PlanetProjection {
   visible: boolean;
 }
 
-interface WorldGridMetrics {
-  columns: number;
-  rows: number;
-  tileRadius: number;
+interface WorldHexLayout {
+  centerX: number;
+  centerY: number;
+  rawCenterX: number;
+  rawCenterY: number;
+  radius: number;
+  globeRadius: number;
+}
+
+interface WorldSectorProjection {
+  sector: World["geography"]["sectors"][string];
+  x: number;
+  y: number;
+  radius: number;
 }
 
 interface RegionSectorProjection {
@@ -1930,20 +1940,58 @@ function planetRadius(width: number, height: number): number {
   return Math.min(width, height) * 0.44;
 }
 
-function worldGridMetrics(sectors: World["geography"]["sectors"][string][]): WorldGridMetrics {
-  const columns = new Set(sectors.map((sector) => sector.q)).size;
-  const rows = new Set(sectors.map((sector) => sector.r)).size;
-  let tileRadius = 1;
-  for (const sector of sectors) {
-    for (const tileId of sector.tileIds) {
-      const tile = world.geography?.tiles?.[tileId];
-      if (!tile) {
-        continue;
-      }
-      tileRadius = Math.max(tileRadius, Math.abs(tile.q), Math.abs(tile.r), Math.abs(tile.q + tile.r));
-    }
+function worldHexRawPoint(q: number, r: number): CanvasPoint {
+  return {
+    x: Math.sqrt(3) * (q + r * 0.5),
+    y: r * 1.5
+  };
+}
+
+function worldHexLayout(sectors: readonly World["geography"]["sectors"][string][], width: number, height: number): WorldHexLayout {
+  const globeRadius = planetRadius(width, height);
+  const centerX = width * 0.5;
+  const centerY = height * 0.51;
+  if (sectors.length === 0) {
+    return { centerX, centerY, rawCenterX: 0, rawCenterY: 0, radius: 42, globeRadius };
   }
-  return { columns: Math.max(1, columns), rows: Math.max(1, rows), tileRadius };
+
+  const points = sectors.map((sector) => worldHexRawPoint(sector.q, sector.r));
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y));
+  const rawWidth = Math.max(1, maxX - minX + Math.sqrt(3));
+  const rawHeight = Math.max(1, maxY - minY + 2);
+  const fittedRadius = Math.min((globeRadius * 1.86) / rawWidth, (globeRadius * 1.86) / rawHeight);
+  return {
+    centerX,
+    centerY,
+    rawCenterX: (minX + maxX) / 2,
+    rawCenterY: (minY + maxY) / 2,
+    radius: clampNumber(fittedRadius, 20, 72),
+    globeRadius
+  };
+}
+
+function projectWorldSectorWithLayout(sector: World["geography"]["sectors"][string], layout: WorldHexLayout): WorldSectorProjection {
+  const raw = worldHexRawPoint(sector.q, sector.r);
+  return {
+    sector,
+    x: layout.centerX + (raw.x - layout.rawCenterX) * layout.radius,
+    y: layout.centerY + (raw.y - layout.rawCenterY) * layout.radius,
+    radius: layout.radius
+  };
+}
+
+function projectedWorldSectors(width: number, height: number): WorldSectorProjection[] {
+  const sectors = Object.values(world.geography?.sectors ?? {}).sort((a, b) => a.r - b.r || a.q - b.q);
+  const layout = worldHexLayout(sectors, width, height);
+  return sectors.map((sector) => projectWorldSectorWithLayout(sector, layout)).sort((a, b) => a.y - b.y || a.x - b.x || a.sector.id.localeCompare(b.sector.id));
+}
+
+function projectWorldSector(sector: World["geography"]["sectors"][string], width: number, height: number): WorldSectorProjection {
+  const sectors = Object.values(world.geography?.sectors ?? {});
+  return projectWorldSectorWithLayout(sector, worldHexLayout(sectors, width, height));
 }
 
 function projectPlanetPoint(x: number, y: number, width: number, height: number): PlanetProjection {
@@ -1965,6 +2013,49 @@ function projectPlanetPoint(x: number, y: number, width: number, height: number)
   };
 }
 
+function planetProjectionFromWorldSector(projected: WorldSectorProjection, width: number, height: number): PlanetProjection {
+  const radius = planetRadius(width, height);
+  const centerX = width * 0.5;
+  const centerY = height * 0.51;
+  const distance = Math.hypot(projected.x - centerX, projected.y - centerY);
+  const edgeDepth = clampNumber(1 - distance / Math.max(1, radius), 0.18, 1);
+  return {
+    x: projected.x,
+    y: projected.y,
+    z: edgeDepth,
+    scale: clampNumber(0.72 + edgeDepth * 0.28, 0.72, 1),
+    visible: distance <= radius + projected.radius
+  };
+}
+
+function projectWorldSettlementProjection(settlement: Settlement, width: number, height: number): PlanetProjection {
+  const sector = world.geography?.sectors?.[settlement.sectorId] ?? nearestSectorAt(settlement.x, settlement.y);
+  if (!sector) {
+    return projectPlanetPoint(settlement.x, settlement.y, width, height);
+  }
+  const projected = projectWorldSector(sector, width, height);
+  const offsetNoise = terrainNoise(settlement.x, settlement.y, settlement.population);
+  const offsetAngle = offsetNoise * Math.PI * 2;
+  const offsetDistance = projected.radius * 0.13;
+  return {
+    ...planetProjectionFromWorldSector(projected, width, height),
+    x: projected.x + Math.cos(offsetAngle) * offsetDistance,
+    y: projected.y + Math.sin(offsetAngle) * offsetDistance * 0.72
+  };
+}
+
+function projectWorldEntityProjection(entity: BandEntitySnapshot, width: number, height: number): PlanetProjection {
+  const settlement = entity.settlementId ? world.settlements[entity.settlementId] : undefined;
+  if (settlement) {
+    return projectWorldSettlementProjection(settlement, width, height);
+  }
+  const sector = entity.sectorId ? world.geography?.sectors?.[entity.sectorId] : undefined;
+  if (sector) {
+    return planetProjectionFromWorldSector(projectWorldSector(sector, width, height), width, height);
+  }
+  return projectPlanetPoint(entity.x, entity.y, width, height);
+}
+
 function planetDepthAlpha(projected: PlanetProjection, floor = 0.08): number {
   return clampNumber(floor + ((projected.z + 0.08) / 0.58) * (1 - floor), floor, 1);
 }
@@ -1972,18 +2063,14 @@ function planetDepthAlpha(projected: PlanetProjection, floor = 0.08): number {
 function nearestPlanetSectorAt(point: CanvasPoint, width: number, height: number): World["geography"]["sectors"][string] | undefined {
   let nearest: World["geography"]["sectors"][string] | undefined;
   let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const sector of Object.values(world.geography?.sectors ?? {})) {
-    const projected = projectPlanetPoint(sector.x, sector.y, width, height);
-    if (!projected.visible) {
-      continue;
-    }
-    const distance = Math.hypot(projected.x - point.x, projected.y - point.y) / Math.max(0.24, projected.scale);
+  for (const projected of projectedWorldSectors(width, height)) {
+    const distance = Math.hypot(projected.x - point.x, projected.y - point.y);
     if (distance < nearestDistance) {
       nearestDistance = distance;
-      nearest = sector;
+      nearest = projected.sector;
     }
   }
-  return nearest;
+  return nearest && nearestDistance <= (projectedWorldSectors(width, height)[0]?.radius ?? 60) * 1.12 ? nearest : undefined;
 }
 
 function projectedRegionSectors(width: number, height: number, settlement: Settlement): RegionSectorProjection[] {
@@ -2161,7 +2248,7 @@ function drawSectorTileAdornments(
 
 function projectSettlement(settlement: Settlement, width: number, height: number): MapPoint {
   if (atlasZoom === "world") {
-    const projected = projectPlanetPoint(settlement.x, settlement.y, width, height);
+    const projected = projectWorldSettlementProjection(settlement, width, height);
     const lift = clampNumber(settlement.elevationMeters / 180, 1, 24) * projected.scale;
     return {
       x: projected.x,
@@ -2263,10 +2350,7 @@ function clipToPlanet(context: CanvasRenderingContext2D, width: number, height: 
 
 function drawWorldTerrainField(context: CanvasRenderingContext2D, width: number, height: number, overlay: AtlasOverlay): void {
   drawWorldBackdrop(context, width, height);
-  const sectors = Object.values(world.geography?.sectors ?? {}).sort((a, b) => a.r - b.r || a.q - b.q);
-  const grid = worldGridMetrics(sectors);
   const globeRadius = planetRadius(width, height);
-  const sectorRadius = clampNumber(globeRadius / Math.max(4.3, grid.columns / 1.75), 38, 72);
   const centerX = width * 0.5;
   const centerY = height * 0.51;
 
@@ -2279,27 +2363,20 @@ function drawWorldTerrainField(context: CanvasRenderingContext2D, width: number,
   context.fillStyle = ocean;
   context.fillRect(centerX - globeRadius, centerY - globeRadius, globeRadius * 2, globeRadius * 2);
 
-  const projectedSectors = sectors
-    .map((sector) => ({ sector, projected: projectPlanetPoint(sector.x, sector.y, width, height) }))
-    .filter((item) => item.projected.visible)
-    .sort((a, b) => a.projected.z - b.projected.z || a.sector.r - b.sector.r || a.sector.q - b.sector.q);
-  for (const { sector, projected } of projectedSectors) {
-    const radius = sectorRadius * (0.9 + projected.scale * 0.12);
-    const lift =
-      sector.kind !== "ocean"
-        ? clampNumber((sector.elevationBand === "alpine" ? 2400 : sector.elevationBand === "high" ? 1400 : sector.elevationBand === "middle" ? 620 : 80) / 1500, 0, 2.4) * projected.scale
-        : 0;
+  for (const projected of projectedWorldSectors(width, height)) {
+    const { sector, x, y, radius } = projected;
+    const lift = 0;
     drawTerrainHexCell(
       context,
-      projected.x,
-      projected.y,
-      radius,
+      x,
+      y,
+      radius * 1.003,
       sectorCellColor(sector, sector.x, sector.y, overlay),
-      sector.kind === "ocean" ? "rgba(216, 232, 223, 0.12)" : "rgba(13, 16, 14, 0.28)",
+      sector.kind === "ocean" ? "rgba(216, 232, 223, 0.14)" : "rgba(13, 16, 14, 0.36)",
       lift,
-      0.8 + projected.scale * 0.55
+      sector.kind === "ocean" ? 0.7 : 0.95
     );
-    drawSectorTileAdornments(context, sector, projected.x, projected.y, Math.sqrt(3) * radius, radius * 2, lift, "world");
+    drawSectorTileAdornments(context, sector, x, y, Math.sqrt(3) * radius, radius * 2, lift, "world");
   }
 
   context.save();
@@ -2601,7 +2678,7 @@ function drawTerritoryClaims(context: CanvasRenderingContext2D, width: number, h
       .filter((settlement): settlement is Settlement => Boolean(settlement))
       .map((settlement) => ({
         point: projectSettlement(settlement, width, height),
-        projection: atlasZoom === "world" ? projectPlanetPoint(settlement.x, settlement.y, width, height) : undefined
+        projection: atlasZoom === "world" ? projectWorldSettlementProjection(settlement, width, height) : undefined
       }))
       .filter((item) => !item.projection || item.projection.visible);
     const points = projectedSettlements.map((item) => item.point);
@@ -2661,7 +2738,7 @@ function drawWeatherFronts(context: CanvasRenderingContext2D, width: number, hei
       .filter((settlement): settlement is Settlement => Boolean(settlement))
       .map((settlement) => ({
         point: projectSettlement(settlement, width, height),
-        projection: atlasZoom === "world" ? projectPlanetPoint(settlement.x, settlement.y, width, height) : undefined
+        projection: atlasZoom === "world" ? projectWorldSettlementProjection(settlement, width, height) : undefined
       }))
       .filter((item) => !item.projection || item.projection.visible);
     const points = projectedSettlements.map((item) => item.point);
@@ -2773,8 +2850,8 @@ function drawRoute(context: CanvasRenderingContext2D, route: TravelRoute, width:
   if (!from || !to) {
     return;
   }
-  const fromProjection = atlasZoom === "world" ? projectPlanetPoint(from.x, from.y, width, height) : undefined;
-  const toProjection = atlasZoom === "world" ? projectPlanetPoint(to.x, to.y, width, height) : undefined;
+  const fromProjection = atlasZoom === "world" ? projectWorldSettlementProjection(from, width, height) : undefined;
+  const toProjection = atlasZoom === "world" ? projectWorldSettlementProjection(to, width, height) : undefined;
   if (atlasZoom === "world") {
     if (!fromProjection?.visible || !toProjection?.visible) {
       return;
@@ -2889,7 +2966,7 @@ function drawStoryMarkers(context: CanvasRenderingContext2D, width: number, heig
     if (!settlement) {
       continue;
     }
-    const projection = atlasZoom === "world" ? projectPlanetPoint(settlement.x, settlement.y, width, height) : undefined;
+    const projection = atlasZoom === "world" ? projectWorldSettlementProjection(settlement, width, height) : undefined;
     if (projection && !projection.visible) {
       continue;
     }
@@ -2916,7 +2993,7 @@ function drawStoryMarkers(context: CanvasRenderingContext2D, width: number, heig
     if (!settlement) {
       continue;
     }
-    const projection = atlasZoom === "world" ? projectPlanetPoint(settlement.x, settlement.y, width, height) : undefined;
+    const projection = atlasZoom === "world" ? projectWorldSettlementProjection(settlement, width, height) : undefined;
     if (projection && !projection.visible) {
       continue;
     }
@@ -2943,7 +3020,7 @@ function drawStoryMarkers(context: CanvasRenderingContext2D, width: number, heig
     if (!settlement) {
       continue;
     }
-    const projection = atlasZoom === "world" ? projectPlanetPoint(settlement.x, settlement.y, width, height) : undefined;
+    const projection = atlasZoom === "world" ? projectWorldSettlementProjection(settlement, width, height) : undefined;
     if (projection && !projection.visible) {
       continue;
     }
@@ -3039,7 +3116,7 @@ function projectedBandFromSnapshot(entity: BandEntitySnapshot, width: number, he
     return undefined;
   }
   if (atlasZoom === "world") {
-    const projection = projectPlanetPoint(entity.x, entity.y, width, height);
+    const projection = projectWorldEntityProjection(entity, width, height);
     if (!projection.visible) {
       return undefined;
     }
@@ -3082,7 +3159,7 @@ function drawSettlement(
   snapshot?: RenderSnapshot
 ): void {
   const isSelected = settlement.id === selectedId;
-  const projection = atlasZoom === "world" ? projectPlanetPoint(settlement.x, settlement.y, width, height) : undefined;
+  const projection = atlasZoom === "world" ? projectWorldSettlementProjection(settlement, width, height) : undefined;
   if (projection && !projection.visible) {
     return;
   }
@@ -3166,7 +3243,7 @@ function drawFeatures(context: CanvasRenderingContext2D, width: number, height: 
     if (!settlement) {
       continue;
     }
-    const projection = atlasZoom === "world" ? projectPlanetPoint(settlement.x, settlement.y, width, height) : undefined;
+    const projection = atlasZoom === "world" ? projectWorldSettlementProjection(settlement, width, height) : undefined;
     if (projection && (!projection.visible || planetDepthAlpha(projection, 0.02) < 0.32)) {
       continue;
     }
@@ -3234,7 +3311,7 @@ function nearestProjectedSettlement(point: CanvasPoint, width: number, height: n
   let nearest: Settlement | undefined;
   let nearestDistance = maxDistance;
   for (const settlement of Object.values(world.settlements)) {
-    if (atlasZoom === "world" && !projectPlanetPoint(settlement.x, settlement.y, width, height).visible) {
+    if (atlasZoom === "world" && !projectWorldSettlementProjection(settlement, width, height).visible) {
       continue;
     }
     const projected = projectSettlement(settlement, width, height);
