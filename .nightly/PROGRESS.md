@@ -8,12 +8,22 @@ Repo: `C:\dev\godwatch`
 | Tranche | Status | Notes |
 | --- | --- | --- |
 | T1 Spatial contracts & local map skeleton | DONE | Added parseable local tile IDs, settlement-local-map metadata, in-bounds footprint repair, and deterministic micro-scenario. |
-| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | Pure render snapshot selector, camera state, local footprint data, and deterministic snapshot proof are in place. |
+| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | Pure render snapshot selector, first `main.ts` map consumer, camera state, local footprint data, and deterministic snapshot proof are in place. |
 | T3 Work orders, reservations, visible haul/build | TODO | Blocked until T2 acceptance is complete. |
 | T4 Interpolation, combat readability, skills | TODO | Blocked until T3 acceptance is complete. |
 | T5 God command bus + first economy pressure | TODO | Blocked until T4 acceptance is complete. |
 
 ## Runs
+
+## Run 2026-05-27T23:17:05Z
+- Branch / HEAD: nightly/godwatch-legibility / fa3766b
+- Tranche / slice: T2 first `main.ts` render snapshot consumer
+- Status: DONE
+- Tests: npm run check -> PASS
+- Commit: pending pushed: no
+- Files touched: `.nightly/PROGRESS.md`, `src/main.ts`
+- Next run: Keep T2 in progress by unifying band projection, drawing, hover, and click hit-testing around one snapshot-backed helper.
+- Blockers: none.
 
 ## Run 2026-05-27T23:01:16Z
 - Branch / HEAD: nightly/godwatch-legibility / 1d96791

@@ -45,6 +45,7 @@ import type {
   WorldGenConfig,
   World
 } from "./types";
+import { createRenderSnapshot, type RenderSnapshot } from "./view/snapshot";
 
 const storageKey = "godwatch.save.v1";
 type ActivityScope = "person" | "band" | "village" | "empire";
@@ -206,6 +207,18 @@ function selectedPerson(): Person {
 function selectedSettlement(): Settlement {
   const band = selectedBand();
   return world.settlements[selectedMapSettlementId] ?? world.settlements[band.locationId] ?? Object.values(world.settlements)[0];
+}
+
+function currentRenderSnapshot(): RenderSnapshot {
+  return createRenderSnapshot(world, {
+    mode: atlasZoom,
+    overlay: atlasOverlay,
+    selectedSettlementId: selectedSettlement().id,
+    selectedMapSettlementId,
+    selectedBandId: world.selectedBandId,
+    selectedPersonId: world.selectedPersonId,
+    includeEffects: true
+  });
 }
 
 function selectedSociety(): Faction {
@@ -2729,8 +2742,8 @@ function drawLingeringEffect(context: CanvasRenderingContext2D, effect: Lingerin
   context.restore();
 }
 
-function drawLingeringEffects(context: CanvasRenderingContext2D, width: number, height: number): void {
-  Object.values(world.lingeringEffects ?? {})
+function drawLingeringEffects(context: CanvasRenderingContext2D, width: number, height: number, effects: readonly LingeringEffect[]): void {
+  [...effects]
     .sort((a, b) => a.kind.localeCompare(b.kind))
     .forEach((effect) => drawLingeringEffect(context, effect, width, height));
 }
@@ -3420,13 +3433,14 @@ function renderMap(): void {
 
   const width = canvas.width;
   const height = canvas.height;
-  const settlements = Object.values(world.settlements);
+  const snapshot = currentRenderSnapshot();
+  const settlements = snapshot.settlements;
   const labels: MapLabel[] = [];
   context.clearRect(0, 0, width, height);
 
   if (atlasZoom === "local") {
     drawLocalAtlas(context, width, height, selectedSettlement(), labels);
-    drawLingeringEffects(context, width, height);
+    drawLingeringEffects(context, width, height, snapshot.effects);
     drawMapLabels(context, labels, width, height);
     return;
   }
@@ -3448,8 +3462,8 @@ function renderMap(): void {
   }
 
   const selectedRouteId = selectedBand().travel?.routeId;
-  const selectedSettlementId = selectedSettlement().id;
-  const visibleRoutes = Object.values(world.planet.routes)
+  const selectedSettlementId = snapshot.selections.settlementId;
+  const visibleRoutes = snapshot.routes
     .map((route) => ({
       route,
       score:
