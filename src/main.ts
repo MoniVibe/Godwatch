@@ -1786,6 +1786,15 @@ interface CanvasPoint {
   y: number;
 }
 
+type BandEntitySnapshot = RenderSnapshot["entities"][number];
+
+interface ProjectedBand {
+  band: Band;
+  entity: BandEntitySnapshot;
+  point: CanvasPoint;
+  depthAlpha: number;
+}
+
 interface PlanetProjection {
   x: number;
   y: number;
@@ -3020,11 +3029,45 @@ function drawSettlementBuiltEnvironment(
   }
 }
 
-function prominentBandPoints(width: number, height: number): CanvasPoint[] {
-  return Object.values(world.bands)
-    .filter((band) => band.id === world.selectedBandId || band.id === world.deity.favoredBandId)
-    .map((band) => projectedBandPoint(band, width, height))
-    .filter((point): point is CanvasPoint => Boolean(point));
+function snapshotBandEntities(snapshot: RenderSnapshot): BandEntitySnapshot[] {
+  return snapshot.entities.filter((entity) => entity.subjectKind === "band" && Boolean(world.bands[entity.subjectId]));
+}
+
+function projectedBandFromSnapshot(entity: BandEntitySnapshot, width: number, height: number): ProjectedBand | undefined {
+  const band = world.bands[entity.subjectId];
+  if (!band) {
+    return undefined;
+  }
+  if (atlasZoom === "world") {
+    const projection = projectPlanetPoint(entity.x, entity.y, width, height);
+    if (!projection.visible) {
+      return undefined;
+    }
+    return {
+      band,
+      entity,
+      point: { x: projection.x, y: projection.y },
+      depthAlpha: planetDepthAlpha(projection, 0.1)
+    };
+  }
+  return {
+    band,
+    entity,
+    point: { x: entity.x * width, y: entity.y * height },
+    depthAlpha: 1
+  };
+}
+
+function projectedSnapshotBands(snapshot: RenderSnapshot, width: number, height: number): ProjectedBand[] {
+  return snapshotBandEntities(snapshot)
+    .map((entity) => projectedBandFromSnapshot(entity, width, height))
+    .filter((projected): projected is ProjectedBand => Boolean(projected));
+}
+
+function prominentBandPoints(snapshot: RenderSnapshot, width: number, height: number): CanvasPoint[] {
+  return projectedSnapshotBands(snapshot, width, height)
+    .filter(({ band }) => band.id === snapshot.selections.bandId || band.id === world.deity.favoredBandId)
+    .map(({ point }) => point);
 }
 
 function drawSettlement(
@@ -3035,7 +3078,8 @@ function drawSettlement(
   selectedId: string,
   labels: MapLabel[],
   pointOverride?: MapPoint,
-  labelMode: "all" | "major" = "all"
+  labelMode: "all" | "major" = "all",
+  snapshot?: RenderSnapshot
 ): void {
   const isSelected = settlement.id === selectedId;
   const projection = atlasZoom === "world" ? projectPlanetPoint(settlement.x, settlement.y, width, height) : undefined;
@@ -3090,7 +3134,9 @@ function drawSettlement(
 
   const isCapital = faction?.capitalId === settlement.id;
   const crowdedByProminentBand =
-    atlasZoom === "world" && prominentBandPoints(width, height).some((bandPoint) => Math.hypot(bandPoint.x - point.x, bandPoint.y - point.y) < 48);
+    atlasZoom === "world" &&
+    snapshot &&
+    prominentBandPoints(snapshot, width, height).some((bandPoint) => Math.hypot(bandPoint.x - point.x, bandPoint.y - point.y) < 48);
   const shouldLabel = labelMode === "all" || settlement.id === selectedId || isCapital || settlement.population >= 520 || settlement.threat >= 74;
   if (shouldLabel && !crowdedByProminentBand && (!projection || isSelected || depthAlpha >= 0.42)) {
     labels.push({
@@ -3138,50 +3184,13 @@ function drawFeatures(context: CanvasRenderingContext2D, width: number, height: 
   }
 }
 
-function drawBands(context: CanvasRenderingContext2D, width: number, height: number, labels: MapLabel[], focusOnly = false): void {
-  for (const band of Object.values(world.bands)) {
+function drawBands(context: CanvasRenderingContext2D, width: number, height: number, labels: MapLabel[], snapshot: RenderSnapshot, focusOnly = false): void {
+  for (const projected of projectedSnapshotBands(snapshot, width, height)) {
+    const { band, point, depthAlpha } = projected;
     const isFavored = band.id === world.deity.favoredBandId;
-    const isSelected = band.id === world.selectedBandId;
+    const isSelected = band.id === snapshot.selections.bandId;
     if (focusOnly && !isFavored && !isSelected) {
       continue;
-    }
-    let x = 0;
-    let y = 0;
-    let depthAlpha = 1;
-    if (band.travel) {
-      const origin = world.settlements[band.travel.originId];
-      const destination = world.settlements[band.travel.destinationId];
-      if (!origin || !destination) {
-        continue;
-      }
-      if (atlasZoom === "world") {
-        const originProjection = projectPlanetPoint(origin.x, origin.y, width, height);
-        const destinationProjection = projectPlanetPoint(destination.x, destination.y, width, height);
-        if (!originProjection.visible && !destinationProjection.visible) {
-          continue;
-        }
-        depthAlpha = Math.max(0.2, Math.min(planetDepthAlpha(originProjection, 0.08), planetDepthAlpha(destinationProjection, 0.08)));
-      }
-      const a = projectSettlement(origin, width, height);
-      const b = projectSettlement(destination, width, height);
-      const t = clampNumber(band.travel.progress / band.travel.total, 0, 1);
-      x = a.x + (b.x - a.x) * t;
-      y = a.y + (b.y - a.y) * t;
-    } else {
-      const settlement = world.settlements[band.locationId];
-      if (!settlement) {
-        continue;
-      }
-      if (atlasZoom === "world") {
-        const projection = projectPlanetPoint(settlement.x, settlement.y, width, height);
-        if (!projection.visible) {
-          continue;
-        }
-        depthAlpha = planetDepthAlpha(projection, 0.1);
-      }
-      const point = projectSettlement(settlement, width, height);
-      x = point.x;
-      y = point.y;
     }
 
     const size = isSelected ? 11 : isFavored ? 10 : 8;
@@ -3191,10 +3200,10 @@ function drawBands(context: CanvasRenderingContext2D, width: number, height: num
     context.fillStyle = isFavored ? "#f3e1a1" : "rgba(13, 16, 14, 0.92)";
     context.strokeStyle = isSelected ? "#e6bb5b" : isFavored ? "#1b1f1b" : "rgba(244, 234, 216, 0.86)";
     context.lineWidth = isSelected || isFavored ? 3 : 2;
-    context.moveTo(x, y - size);
-    context.lineTo(x + size, y);
-    context.lineTo(x, y + size);
-    context.lineTo(x - size, y);
+    context.moveTo(point.x, point.y - size);
+    context.lineTo(point.x + size, point.y);
+    context.lineTo(point.x, point.y + size);
+    context.lineTo(point.x - size, point.y);
     context.closePath();
     context.fill();
     context.stroke();
@@ -3203,8 +3212,8 @@ function drawBands(context: CanvasRenderingContext2D, width: number, height: num
     if (isSelected || isFavored) {
       labels.push({
         text: band.name,
-        x: x + size + 7,
-        y: atlasZoom === "world" ? y - size - 18 : y - size - 2,
+        x: point.x + size + 7,
+        y: atlasZoom === "world" ? point.y - size - 18 : point.y - size - 2,
         priority: atlasZoom === "world" ? (isSelected ? 150 : 138) : isSelected ? 130 : 115,
         color: isFavored ? "#f3e1a1" : "#f4ead8",
         alpha: atlasZoom === "world" ? Math.max(0.82, depthAlpha) : 1
@@ -3219,36 +3228,6 @@ function canvasPointFromEvent(canvas: HTMLCanvasElement, event: MouseEvent): Can
     x: ((event.clientX - rect.left) / Math.max(1, rect.width)) * canvas.width,
     y: ((event.clientY - rect.top) / Math.max(1, rect.height)) * canvas.height
   };
-}
-
-function projectedBandPoint(band: Band, width: number, height: number): CanvasPoint | undefined {
-  if (band.travel) {
-    const origin = world.settlements[band.travel.originId];
-    const destination = world.settlements[band.travel.destinationId];
-    if (!origin || !destination) {
-      return undefined;
-    }
-    if (atlasZoom === "world") {
-      const originProjection = projectPlanetPoint(origin.x, origin.y, width, height);
-      const destinationProjection = projectPlanetPoint(destination.x, destination.y, width, height);
-      if (!originProjection.visible && !destinationProjection.visible) {
-        return undefined;
-      }
-    }
-    const a = projectSettlement(origin, width, height);
-    const b = projectSettlement(destination, width, height);
-    const t = clampNumber(band.travel.progress / band.travel.total, 0, 1);
-    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-  }
-  const settlement = world.settlements[band.locationId];
-  if (!settlement) {
-    return undefined;
-  }
-  if (atlasZoom === "world" && !projectPlanetPoint(settlement.x, settlement.y, width, height).visible) {
-    return undefined;
-  }
-  const point = projectSettlement(settlement, width, height);
-  return { x: point.x, y: point.y };
 }
 
 function nearestProjectedSettlement(point: CanvasPoint, width: number, height: number, maxDistance: number): Settlement | undefined {
@@ -3268,18 +3247,14 @@ function nearestProjectedSettlement(point: CanvasPoint, width: number, height: n
   return nearest;
 }
 
-function nearestProjectedBand(point: CanvasPoint, width: number, height: number, maxDistance: number): Band | undefined {
-  let nearest: Band | undefined;
+function nearestProjectedBand(snapshot: RenderSnapshot, point: CanvasPoint, width: number, height: number, maxDistance: number): ProjectedBand | undefined {
+  let nearest: ProjectedBand | undefined;
   let nearestDistance = maxDistance;
-  for (const band of Object.values(world.bands)) {
-    const projected = projectedBandPoint(band, width, height);
-    if (!projected) {
-      continue;
-    }
-    const distance = Math.hypot(projected.x - point.x, projected.y - point.y);
+  for (const projected of projectedSnapshotBands(snapshot, width, height)) {
+    const distance = Math.hypot(projected.point.x - point.x, projected.point.y - point.y);
     if (distance < nearestDistance) {
       nearestDistance = distance;
-      nearest = band;
+      nearest = projected;
     }
   }
   return nearest;
@@ -3340,11 +3315,12 @@ function focusMapFromCanvasEvent(canvas: HTMLCanvasElement, event: MouseEvent): 
     return;
   }
   const point = canvasPointFromEvent(canvas, event);
-  const band = nearestProjectedBand(point, canvas.width, canvas.height, atlasZoom === "world" ? 22 : 28);
-  if (band) {
+  const bandHit = nearestProjectedBand(currentRenderSnapshot(), point, canvas.width, canvas.height, atlasZoom === "world" ? 22 : 28);
+  if (bandHit) {
+    const { band, entity } = bandHit;
     world.selectedBandId = band.id;
     world.selectedPersonId = band.leaderId;
-    selectedMapSettlementId = band.travel?.destinationId ?? band.locationId;
+    selectedMapSettlementId = entity.targetLocationId ?? entity.settlementId ?? band.travel?.destinationId ?? band.locationId;
     selectedFactionId = world.persons[band.leaderId]?.factionId ?? selectedFactionId;
     return;
   }
@@ -3409,9 +3385,9 @@ function renderMapHoverAt(canvas: HTMLCanvasElement, event: MouseEvent): string 
     const sector = nearestRegionSectorAt(point, canvas.width, canvas.height, selectedSettlement()) ?? sectorForSettlement(selectedSettlement());
     return sector ? renderSectorHover(sector) : renderSettlementHover(selectedSettlement());
   }
-  const band = nearestProjectedBand(point, canvas.width, canvas.height, 22);
-  if (band) {
-    return renderBandHover(band);
+  const bandHit = nearestProjectedBand(currentRenderSnapshot(), point, canvas.width, canvas.height, 22);
+  if (bandHit) {
+    return renderBandHover(bandHit.band);
   }
   const settlement = nearestProjectedSettlement(point, canvas.width, canvas.height, atlasZoom === "world" ? 28 : 36);
   if (settlement) {
@@ -3481,9 +3457,9 @@ function renderMap(): void {
 
   const selectedId = selectedSettlement().id;
   for (const settlement of settlements.sort((a, b) => a.y - b.y)) {
-    drawSettlement(context, settlement, width, height, selectedId, labels, undefined, "major");
+    drawSettlement(context, settlement, width, height, selectedId, labels, undefined, "major", snapshot);
   }
-  drawBands(context, width, height, labels, true);
+  drawBands(context, width, height, labels, snapshot, true);
   context.restore();
   drawMapLabels(context, labels, width, height);
 }

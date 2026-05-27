@@ -8,12 +8,23 @@ Repo: `C:\dev\godwatch`
 | Tranche | Status | Notes |
 | --- | --- | --- |
 | T1 Spatial contracts & local map skeleton | DONE | Added parseable local tile IDs, settlement-local-map metadata, in-bounds footprint repair, and deterministic micro-scenario. |
-| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | Pure render snapshot selector, first `main.ts` map consumer, camera state, local footprint data, and deterministic snapshot proof are in place; nightly now runs functional tandem lanes. |
+| T2 Snapshot pipeline & `main.ts` split | IN_PROGRESS | Pure render snapshot selector, first `main.ts` map consumer, snapshot-backed band draw/hit-test, camera state, local footprint data, and deterministic snapshot proof are in place; nightly now runs functional tandem lanes. |
 | T3 Work orders, reservations, visible haul/build | TODO | Blocked until T2 acceptance is complete. |
 | T4 Interpolation, combat readability, skills | TODO | Blocked until T3 acceptance is complete. |
 | T5 God command bus + first economy pressure | TODO | Blocked until T4 acceptance is complete. |
 
 ## Runs
+
+## Run 2026-05-27T23:35:37Z
+- Branch / HEAD: nightly/godwatch-legibility / 2b91a8a
+- Tranche / slice: T2 snapshot-backed band projection and hit-test
+- Status: DONE
+- Tests: npm run check -> PASS
+- Commit: pending pushed: no
+- Lanes: systems=none, visual=done, micro=done
+- Files touched: `.nightly/PROGRESS.md`, `src/main.ts`, `scripts/micro-scenarios-entry.ts`
+- Next run: Continue T2 by extracting a small pure render/hit-test module or moving hover/tile grammar into `src/render/*` without changing sim truth.
+- Blockers: none.
 
 ## Run 2026-05-27T23:31:00Z
 - Branch / HEAD: nightly/godwatch-legibility / 65ede1e

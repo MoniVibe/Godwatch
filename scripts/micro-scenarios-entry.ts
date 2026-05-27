@@ -473,6 +473,36 @@ results.push(
 );
 
 results.push(
+  scenario("render snapshot carries selected band position", () => {
+    const world = createWorld("micro-render-snapshot-band-position");
+    const band = firstBand(world);
+    const settlement = world.settlements[band.locationId];
+    assert(settlement, "Expected selected band settlement.");
+
+    const before = JSON.stringify(world);
+    const snapshot = createRenderSnapshot(world, { mode: "region", overlay: "political", selectedBandId: band.id, selectedSettlementId: settlement.id });
+    const repeat = createRenderSnapshot(world, { mode: "region", overlay: "political", selectedBandId: band.id, selectedSettlementId: settlement.id });
+    const after = JSON.stringify(world);
+
+    const bandEntity = snapshot.entities.find((entry) => entry.subjectKind === "band" && entry.subjectId === band.id);
+    const repeatedBandEntity = repeat.entities.find((entry) => entry.subjectKind === "band" && entry.subjectId === band.id);
+
+    assert(after === before, "Expected selected band render snapshot creation not to mutate world.");
+    assert(snapshot.selections.bandId === band.id, "Expected render snapshot selection to carry selected band id.");
+    assert(bandEntity, "Expected selected band entity in render snapshot.");
+    assert(repeatedBandEntity, "Expected selected band entity in repeated render snapshot.");
+    assert(Number.isFinite(bandEntity.x) && Number.isFinite(bandEntity.y), "Expected selected band snapshot coordinates to be finite.");
+    assert(bandEntity.subjectKind === "band" && bandEntity.subjectId === band.id, "Expected selected band entity identity.");
+    assert(["settlement", "route", "tile"].includes(bandEntity.anchorKind), `Expected selected band anchor to be settlement, route, or tile; got ${bandEntity.anchorKind}.`);
+    assert(bandEntity.x === repeatedBandEntity.x && bandEntity.y === repeatedBandEntity.y, "Expected selected band snapshot coordinates to be stable.");
+    assert(JSON.stringify(snapshotDebugSummary(snapshot)) === JSON.stringify(snapshotDebugSummary(repeat)), "Expected selected band snapshot summary to be stable.");
+    assertValid(world, "render snapshot selected band position scenario");
+
+    return `${band.name}: ${bandEntity.anchorKind} ${bandEntity.x.toFixed(3)},${bandEntity.y.toFixed(3)} selected ${snapshot.selections.bandId}`;
+  })
+);
+
+results.push(
   scenario("building service assigns local occupant and tile", () => {
     const world = createWorld("micro-building-service-occupancy");
     const settlement = Object.values(world.settlements)[0];
