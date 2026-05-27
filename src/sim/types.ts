@@ -1162,6 +1162,23 @@ export interface SettlementBorder {
   tags: string[];
 }
 
+export type SettlementLocalMapKind = "camp" | "village" | "town" | "city";
+export type LocalTerrainKind = "floor" | "road" | "soil" | "water" | "forest" | "rock" | "cliff";
+
+export interface SettlementLocalMap {
+  id: Id;
+  settlementId: Id;
+  kind: SettlementLocalMapKind;
+  width: number;
+  height: number;
+  layer: MediumLayer;
+  entranceTileId: Id;
+  centerTileId: Id;
+  generatedTick: number;
+  repairFlags: string[];
+  tags: string[];
+}
+
 export interface Settlement {
   id: Id;
   name: string;
@@ -1189,6 +1206,7 @@ export interface Settlement {
   buildings?: SettlementBuilding[];
   borders?: SettlementBorder[];
   buildOrders?: SettlementBuildOrder[];
+  localMap?: SettlementLocalMap;
 }
 
 export interface BiomeProfile {

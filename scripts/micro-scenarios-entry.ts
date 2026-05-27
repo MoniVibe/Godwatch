@@ -17,6 +17,7 @@ import {
   issueSettlementBuildOrders,
   updateSettlementBuildingServices
 } from "../src/sim/world/buildings";
+import { ensureLocalMapForSettlement, validLocalTileIdForMap } from "../src/sim/world/localMap";
 import { collectOccupancySnapshot } from "../src/sim/world/occupancy";
 import type {
   AssetKind,
@@ -391,6 +392,54 @@ results.push(
 
     assertValid(world, "settlement service asset scenario");
     return `${settlement.name}: ${catalogId} -> ${asset.kind} asset ${asset.status}; assets ${beforeAssetCount}->${afterAssetCount}`;
+  })
+);
+
+results.push(
+  scenario("settlement local map bounds repair", () => {
+    const world = createWorld("micro-settlement-local-map-bounds");
+    const settlement = Object.values(world.settlements)[0];
+    assert(settlement, "Expected settlement fixture.");
+    ensureSettlementDevelopment(world);
+
+    const map = ensureLocalMapForSettlement(settlement, world.tick);
+    assert(map.width > 0 && map.height > 0, "Expected settlement local map dimensions.");
+    assert(validLocalTileIdForMap(settlement.id, map, map.entranceTileId), "Expected settlement local map entrance in bounds.");
+
+    for (const building of settlement.buildings ?? []) {
+      assert(building.footprint, `Expected ${building.name} to have a footprint.`);
+      for (const tileId of building.footprint.tileIds) {
+        assert(validLocalTileIdForMap(settlement.id, map, tileId), `Expected ${building.name} footprint tile to be in bounds.`);
+      }
+    }
+
+    const building = settlement.buildings?.find((candidate) => candidate.status === "active" && (candidate.services?.length ?? 0) > 0);
+    assert(building?.footprint, "Expected active service building with footprint.");
+    const service = building.services?.[0];
+    assert(service, "Expected service slot.");
+    const person =
+      Object.values(world.persons).find((candidate) => candidate.alive && !candidate.bandId && candidate.locationId === settlement.id) ??
+      Object.values(world.persons).find((candidate) => candidate.alive);
+    assert(person, "Expected local person fixture.");
+    person.locationId = settlement.id;
+    person.bandId = undefined;
+    person.buildingId = building.id;
+    person.currentService = service.kind;
+    person.localTileId = "local-tile:invalid:surface:9999:9999";
+    service.occupantIds = [person.id];
+    building.occupantIds = [person.id];
+
+    ensureSettlementDevelopment(world);
+    const repairedBuilding = settlement.buildings?.find((candidate) => candidate.id === building.id);
+    assert(repairedBuilding?.footprint, "Expected repaired building footprint.");
+    assert(person.localTileId, "Expected invalid assigned person local tile to repair.");
+    assert(repairedBuilding.footprint.tileIds.includes(person.localTileId), "Expected repaired assigned person local tile inside building footprint.");
+    assert(validLocalTileIdForMap(settlement.id, ensureLocalMapForSettlement(settlement, world.tick), person.localTileId), "Expected repaired assigned person local tile in bounds.");
+
+    const telemetry = collectTelemetry(world);
+    assert(telemetry.invariantIssues.length === 0, `Expected telemetry-clean local map repair world:\n${telemetry.invariantIssues.join("\n")}`);
+    assertValid(world, "settlement local map repair scenario");
+    return `${settlement.name}: ${map.kind} ${map.width}x${map.height}; repaired ${person.name} to ${person.localTileId}`;
   })
 );
 

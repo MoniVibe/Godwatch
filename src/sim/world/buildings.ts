@@ -1,4 +1,10 @@
 import { clamp } from "../core/math";
+import {
+  ensureLocalMapForSettlement,
+  repairBuildingFootprintForLocalMap,
+  repairPersonLocalTileForSettlement,
+  validateSettlementLocalMap
+} from "./localMap";
 import type {
   Id,
   Asset,
@@ -442,13 +448,7 @@ function footprintFor(settlement: Settlement, catalogId: SettlementBuildingKind,
   const anchorR = (Math.floor(code / 13) % 13) - 6;
   const width = Math.max(1, size.width + (catalogId === "housing" ? Math.max(0, level - 2) : 0));
   const height = Math.max(1, size.height);
-  const tileIds: Id[] = [];
-  for (let q = 0; q < width; q += 1) {
-    for (let r = 0; r < height; r += 1) {
-      tileIds.push(stableId("local-tile", [settlement.id, catalogId, String(anchorQ + q), String(anchorR + r)]));
-    }
-  }
-  return { tileIds, width, height, anchorQ, anchorR, layer: "surface" };
+  return repairBuildingFootprintForLocalMap(settlement, { tileIds: [], width, height, anchorQ, anchorR, layer: "surface" }).footprint;
 }
 
 function serviceCapacityFor(settlement: Settlement, catalogId: SettlementBuildingKind, kind: BuildingServiceKind, level: number): number {
@@ -660,7 +660,15 @@ function repairBuilding(settlement: Settlement, value: Partial<SettlementBuildin
   const definition = buildingCatalog[catalogId];
   const level = rounded(value.level ?? buildingLevelFor(settlement, catalogId), 1, 9);
   const integrity = rounded(value.integrity ?? buildingIntegrityFor(settlement, catalogId), 0, 100);
-  const footprint = value.footprint?.tileIds?.length ? value.footprint : footprintFor(settlement, catalogId, level);
+  const rawFootprint = value.footprint?.tileIds?.length ? value.footprint : footprintFor(settlement, catalogId, level);
+  const footprint = repairBuildingFootprintForLocalMap(settlement, {
+    tileIds: [...new Set((rawFootprint.tileIds ?? []).filter((id): id is Id => typeof id === "string" && id.length > 0))],
+    width: Math.max(1, Math.round(rawFootprint.width)),
+    height: Math.max(1, Math.round(rawFootprint.height)),
+    anchorQ: Math.round(rawFootprint.anchorQ),
+    anchorR: Math.round(rawFootprint.anchorR),
+    layer: rawFootprint.layer ?? "surface"
+  }).footprint;
   const services = servicesFor(settlement, { catalogId, level, integrity }, value.services ?? []);
   return {
     id: value.id || stableId("building", [settlement.id, catalogId]),
@@ -675,14 +683,7 @@ function repairBuilding(settlement: Settlement, value: Partial<SettlementBuildin
     upkeep: rounded(value.upkeep ?? definition.upkeep, 0, 999),
     builtTick: Math.max(0, Math.round(value.builtTick ?? 0)),
     tags: uniqueText([...(value.tags ?? []), ...definition.tags]),
-    footprint: {
-      tileIds: [...new Set(footprint.tileIds.filter((id): id is Id => typeof id === "string" && id.length > 0))],
-      width: Math.max(1, Math.round(footprint.width)),
-      height: Math.max(1, Math.round(footprint.height)),
-      anchorQ: Math.round(footprint.anchorQ),
-      anchorR: Math.round(footprint.anchorR),
-      layer: footprint.layer ?? "surface"
-    },
+    footprint,
     occupantIds: [...new Set((value.occupantIds ?? []).filter((id): id is Id => typeof id === "string" && id.length > 0))],
     services,
     lastServiceTick: Math.max(0, Math.round(value.lastServiceTick ?? 0))
@@ -806,6 +807,7 @@ function refreshSettlementBorders(settlement: Settlement): void {
 }
 
 function normalizeSettlementBuildingOccupants(world: World, settlement: Settlement): void {
+  ensureLocalMapForSettlement(settlement, world.tick);
   const buildings = settlement.buildings ?? [];
   const buildingIds = new Set(buildings.map((building) => building.id));
   const retained = new Set<Id>();
@@ -825,9 +827,7 @@ function normalizeSettlementBuildingOccupants(world: World, settlement: Settleme
         }
         person.buildingId = building.id;
         person.currentService = service.kind;
-        if (!person.localTileId || !footprint.tileIds.includes(person.localTileId)) {
-          person.localTileId = footprint.tileIds[0];
-        }
+        person.localTileId = repairPersonLocalTileForSettlement(settlement, person.localTileId, footprint.tileIds[0]);
         retained.add(person.id);
       }
     }
@@ -839,6 +839,15 @@ function normalizeSettlementBuildingOccupants(world: World, settlement: Settleme
       delete person.localTileId;
       delete person.currentService;
     }
+  }
+}
+
+function repairLooseSettlementLocalTiles(world: World, settlement: Settlement): void {
+  for (const person of Object.values(world.persons)) {
+    if (!person.alive || person.locationId !== settlement.id || person.buildingId || !person.localTileId) {
+      continue;
+    }
+    person.localTileId = repairPersonLocalTileForSettlement(settlement, person.localTileId);
   }
 }
 
@@ -890,6 +899,7 @@ function ensureFoundationBuildings(world: World, settlement: Settlement): void {
 
 export function ensureSettlementDevelopment(world: World): SettlementDevelopmentSnapshot {
   for (const settlement of Object.values(world.settlements)) {
+    ensureLocalMapForSettlement(settlement, world.tick);
     const repairedBuildings = (settlement.buildings ?? [])
       .map((building) => repairBuilding(settlement, building))
       .filter((building): building is SettlementBuilding => Boolean(building));
@@ -900,6 +910,7 @@ export function ensureSettlementDevelopment(world: World): SettlementDevelopment
       .filter((order): order is SettlementBuildOrder => Boolean(order));
     refreshSettlementBorders(settlement);
     normalizeSettlementBuildingOccupants(world, settlement);
+    repairLooseSettlementLocalTiles(world, settlement);
   }
   return collectSettlementDevelopmentSnapshot(world);
 }
@@ -1493,6 +1504,7 @@ export function validateSettlementDevelopment(world: World): string[] {
   const issues: string[] = [];
   const buildingFootprints = new Map<Id, Set<Id>>();
   for (const settlement of Object.values(world.settlements)) {
+    issues.push(...validateSettlementLocalMap(settlement));
     const buildingIds = new Set<Id>();
     for (const building of settlement.buildings ?? []) {
       if (!hasBuildingDefinition(building.catalogId)) {
