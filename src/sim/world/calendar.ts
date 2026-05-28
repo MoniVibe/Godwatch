@@ -61,6 +61,25 @@ export interface CalendarSnapshot {
   tags: string[];
 }
 
+export type DayPhase = "dawn" | "day" | "dusk" | "night";
+
+export interface WorldClockSnapshot {
+  tick: number;
+  day: number;
+  tickInDay: number;
+  hour: number;
+  minute: number;
+  timeLabel: string;
+  dayLabel: string;
+  phase: DayPhase;
+  phaseLabel: string;
+  dayProgress: number;
+  hourProgress: number;
+  ticksPerHour: number;
+  ticksPerDay: number;
+  minutesPerTick: number;
+}
+
 export interface CalendarWindow {
   id: Id;
   signature: string;
@@ -159,7 +178,12 @@ interface CalendarWindowDraft {
   tags: string[];
 }
 
-const defaultTicksPerDay = 6;
+export const TICKS_PER_HOUR = 15;
+export const HOURS_PER_DAY = 24;
+export const TICKS_PER_DAY = TICKS_PER_HOUR * HOURS_PER_DAY;
+export const MINUTES_PER_TICK = 60 / TICKS_PER_HOUR;
+const dayStartHour = 6;
+const defaultTicksPerDay = TICKS_PER_DAY;
 const periodLengthDays = 30;
 const moonCycleDays = 28;
 const eventHorizonDays = 7;
@@ -194,6 +218,64 @@ function stableId(prefix: string, parts: readonly string[]): Id {
 
 function rounded(value: number, min = 0, max = 100): number {
   return clamp(Math.round(Number.isFinite(value) ? value : 0), min, max);
+}
+
+function boundedTick(value: number): number {
+  return Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+}
+
+function clockPhase(hour: number): DayPhase {
+  if (hour >= 5 && hour < 7) return "dawn";
+  if (hour >= 7 && hour < 18) return "day";
+  if (hour >= 18 && hour < 20) return "dusk";
+  return "night";
+}
+
+function padTime(value: number): string {
+  return value.toString().padStart(2, "0");
+}
+
+export function dayForTick(tick: number, ticksPerDay = TICKS_PER_DAY): number {
+  return Math.floor(boundedTick(tick) / Math.max(1, Math.floor(ticksPerDay))) + 1;
+}
+
+export function tickInDayFor(tick: number, ticksPerDay = TICKS_PER_DAY): number {
+  const dayLength = Math.max(1, Math.floor(ticksPerDay));
+  return ((boundedTick(tick) % dayLength) + dayLength) % dayLength;
+}
+
+export function deriveWorldClock(
+  tick: number,
+  options: { day?: number; ticksPerDay?: number; ticksPerHour?: number } = {}
+): WorldClockSnapshot {
+  const ticksPerHour = Math.max(1, Math.floor(options.ticksPerHour ?? TICKS_PER_HOUR));
+  const ticksPerDay = Math.max(ticksPerHour, Math.floor(options.ticksPerDay ?? TICKS_PER_DAY));
+  const minutesPerTick = 60 / ticksPerHour;
+  const currentTick = boundedTick(tick);
+  const tickInDay = tickInDayFor(currentTick, ticksPerDay);
+  const rawHour = Math.floor(tickInDay / ticksPerHour) % HOURS_PER_DAY;
+  const tickInHour = tickInDay % ticksPerHour;
+  const hour = (rawHour + dayStartHour) % HOURS_PER_DAY;
+  const minute = Math.floor(tickInHour * minutesPerTick);
+  const phase = clockPhase(hour);
+  const timeLabel = `${padTime(hour)}:${padTime(minute)}`;
+  const day = Math.max(1, Math.floor(options.day ?? dayForTick(currentTick, ticksPerDay)));
+  return {
+    tick: currentTick,
+    day,
+    tickInDay,
+    hour,
+    minute,
+    timeLabel,
+    dayLabel: `Day ${day}`,
+    phase,
+    phaseLabel: phase.replace(/\b[a-z]/g, (letter) => letter.toUpperCase()),
+    dayProgress: tickInDay / ticksPerDay,
+    hourProgress: tickInHour / ticksPerHour,
+    ticksPerHour,
+    ticksPerDay,
+    minutesPerTick
+  };
 }
 
 function uniqueText(values: readonly (string | undefined)[]): string[] {
@@ -276,7 +358,7 @@ function activeSpecialEvents(world: World) {
 
 export function deriveCalendarSnapshot(world: World, options: CalendarSnapshotOptions = {}): CalendarSnapshot {
   const ticksPerDay = options.ticksPerDay ?? defaultTicksPerDay;
-  const day = Math.max(1, world.day || Math.floor(world.tick / ticksPerDay) + 1);
+  const day = Math.max(1, world.day || dayForTick(world.tick, ticksPerDay));
   const dayOfYear = ((day - 1) % yearLengthDays) + 1;
   const year = Math.floor((day - 1) / yearLengthDays) + 1;
   const periodState = periodForDay(dayOfYear);

@@ -1,4 +1,5 @@
 import { clamp } from "../core/math";
+import { TICKS_PER_DAY } from "./calendar";
 import type {
   EncounterKind,
   Id,
@@ -82,7 +83,7 @@ export interface ApplyRemainsEncounterPressureOptions extends RemainsPressureOpt
   maxDeltaPerKind?: number;
 }
 
-const approximateTicksPerDay = 6;
+const approximateTicksPerDay = TICKS_PER_DAY;
 const defaultMinPressure = 28;
 const defaultMaxSignals = 16;
 const defaultMaxProposals = 8;

@@ -15,6 +15,17 @@ Repo: `C:\dev\godwatch`
 
 ## Runs
 
+## Run 2026-05-28T00:17:57Z
+- Branch / HEAD: nightly/godwatch-legibility / af32f7a
+- Tranche / slice: T2 shared 360-tick day clock for sim and visual snapshots
+- Status: DONE
+- Tests: npm run check -> PASS
+- Commit: recorded in this commit; pushed: yes (`origin/nightly/godwatch-legibility`)
+- Lanes: systems=done, visual=done, micro=done
+- Files touched: `.nightly/PROGRESS.md`, `scripts/micro-scenarios-entry.ts`, `src/main.ts`, `src/sim/world/calendar.ts`, `src/sim/world/remains.ts`, `src/sim/world/story.ts`, `src/sim/world/territory.ts`, `src/simulation.ts`, `src/view/snapshot.ts`
+- Next run: Use the clock in interpolation and local actor rendering so movement, work, combat effects, weather, and day/night changes can be smoothed between authoritative ticks.
+- Blockers: none.
+
 ## Run 2026-05-28T00:02:10Z
 - Branch / HEAD: nightly/godwatch-legibility / 8c0f658
 - Tranche / slice: T2 local lingering effect legibility and settlement-scoped projection

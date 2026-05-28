@@ -80,6 +80,7 @@ import { ensureOrganizationEconomy } from "./sim/society/organizations";
 import { ensureStoryState, expireStoryQuest, resolveStoryQuest, setbackStoryQuest, storyQuestBias, updateStoryEngine } from "./sim/world/story";
 import { ensureWorldPhase, maybeScheduleDeterministicWorldEvent, tickSpecialWorldEvents } from "./sim/world/encounters";
 import { applyConditionEncounterPressure, proposeConditionPressureQuestNeeds } from "./sim/world/conditionPressure";
+import { dayForTick, TICKS_PER_DAY } from "./sim/world/calendar";
 import { addLocationPulse, addRouteTrail, updateLingeringEffects } from "./sim/world/effects";
 import { applyRemainsEncounterPressure, proposeRemainsPressureQuestNeeds, syncRemainsForDeadPersons } from "./sim/world/remains";
 import { isQuietActivityAction, quietActivityDecisionScore, updateQuietBandActivity } from "./sim/world/quietActivity";
@@ -110,7 +111,7 @@ import type {
   World
 } from "./sim/types";
 
-const ticksPerDay = 6;
+const ticksPerDay = TICKS_PER_DAY;
 const questKinds: QuestKind[] = ["defense", "delve", "hunt", "escort", "politics"];
 const worldSizeSettlements: Record<WorldGenConfig["size"], number> = {
   small: 6,
@@ -2424,7 +2425,7 @@ export function tickWorld(world: World, steps = 1): World {
   const rng = new Rng(world.rngState);
   for (let step = 0; step < steps; step += 1) {
     world.tick += 1;
-    world.day = Math.floor(world.tick / ticksPerDay) + 1;
+    world.day = dayForTick(world.tick, ticksPerDay);
     updateLingeringEffects(world);
     decayBlessings(world);
     updateSentientItems(world, rng);
@@ -2534,6 +2535,8 @@ export function repairLoadedWorld(value: unknown): World | undefined {
     return undefined;
   }
   maybeWorld.doctrine = { ...defaultDoctrine(), ...maybeWorld.doctrine };
+  maybeWorld.tick = Math.max(0, Math.floor(typeof maybeWorld.tick === "number" && Number.isFinite(maybeWorld.tick) ? maybeWorld.tick : 0));
+  maybeWorld.day = dayForTick(maybeWorld.tick, ticksPerDay);
   maybeWorld.cultures ??= {};
   maybeWorld.lastDecisionScores ??= [];
   maybeWorld.events ??= [];

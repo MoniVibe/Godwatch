@@ -5,6 +5,7 @@ import { identityAxisInfo, identityAxisKeys, identityPoleLabel } from "./sim/ind
 import { archetypeInfo, coreStatKeys, derivedStatKeys, statLabels } from "./sim/individuals/stats";
 import { culturePracticeDefinitions } from "./sim/society/culture";
 import { featureKindLabels, layerLabels } from "./sim/environment/planet";
+import { deriveWorldClock, type DayPhase } from "./sim/world/calendar";
 import {
   blessPerson,
   createWorld,
@@ -392,12 +393,13 @@ function renderLeftRail(): void {
   const elevationLabel = route
     ? `${route.elevationBand} · +${Math.round(route.elevationGain)}m · pass ${route.passDifficulty}`
     : `${location.elevationBand} · ${Math.round(location.elevationMeters)}m`;
+  const clock = deriveWorldClock(world.tick, { day: world.day });
 
   leftRail.innerHTML = `
     <section class="panel deity-panel">
       <div class="panel-heading">
         <h2>Divine View</h2>
-        <span>Day ${world.day} · Tick ${world.tick}</span>
+        <span>${escapeHtml(`${clock.dayLabel} · ${clock.timeLabel}`)}</span>
       </div>
       <div class="pill-grid">
         ${statusPill("Speed", speeds[speedIndex].label)}
@@ -2164,12 +2166,27 @@ function sectorThreatScore(sector: World["geography"]["sectors"][string]): numbe
   return clampNumber((biome?.hazardBonus ?? 10) * 2 + climateStress + (sector.kind === "ocean" ? 30 : 0) + settlementThreat * 0.45, 0, 100);
 }
 
-function timeOfDay(): { id: "dawn" | "day" | "dusk" | "night"; label: string; shade: string } {
-  const tickInDay = ((world.tick % 6) + 6) % 6;
-  if (tickInDay === 0) return { id: "dawn", label: "Dawn", shade: "rgba(230, 187, 91, 0.07)" };
-  if (tickInDay <= 3) return { id: "day", label: "Day", shade: "rgba(244, 234, 216, 0.025)" };
-  if (tickInDay === 4) return { id: "dusk", label: "Dusk", shade: "rgba(168, 112, 72, 0.1)" };
-  return { id: "night", label: "Night", shade: "rgba(7, 10, 18, 0.28)" };
+function dayPhaseShade(phase: DayPhase): string {
+  if (phase === "dawn") return "rgba(230, 187, 91, 0.07)";
+  if (phase === "day") return "rgba(244, 234, 216, 0.025)";
+  if (phase === "dusk") return "rgba(168, 112, 72, 0.1)";
+  return "rgba(7, 10, 18, 0.28)";
+}
+
+function timeOfDay(): { id: DayPhase; label: string; shade: string } {
+  const clock = deriveWorldClock(world.tick, { day: world.day });
+  return {
+    id: clock.phase,
+    label: `${clock.phaseLabel} ${clock.timeLabel}`,
+    shade: dayPhaseShade(clock.phase)
+  };
+}
+
+function dayPhaseBadge(phase: DayPhase): string {
+  if (phase === "dawn") return "DA";
+  if (phase === "day") return "DY";
+  if (phase === "dusk") return "DU";
+  return "NI";
 }
 
 function drawTileBadge(
@@ -2567,7 +2584,7 @@ function drawLocalTileBadges(
   if (tile.layer !== "surface") {
     drawTileBadge(context, x + radius * 0.42, topY + 10, tile.layer.slice(0, 1).toUpperCase(), "rgba(127, 106, 153, 0.38)", "#e8ddff");
   } else {
-    drawTileBadge(context, x + radius * 0.42, topY + 10, timeOfDay().id.slice(0, 1).toUpperCase(), "rgba(216, 201, 158, 0.18)", "#d8c99e");
+    drawTileBadge(context, x + radius * 0.42, topY + 10, dayPhaseBadge(timeOfDay().id), "rgba(216, 201, 158, 0.18)", "#d8c99e");
   }
   if (tile.resourceHints.length > 0) {
     drawTileBadge(context, x - radius * 0.42, bottomY - 7, "R", "rgba(125, 143, 91, 0.36)", "#d7d9cd");

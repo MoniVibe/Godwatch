@@ -2,6 +2,7 @@ import { event } from "../chronicle/events";
 import { average, clamp, makeId } from "../core/math";
 import type { Rng } from "../core/rng";
 import type { Faction, Id, MediumRegion, SeasonKind, Territory, WeatherFront, WeatherKind, WeatherSystem, World } from "../types";
+import { TICKS_PER_DAY } from "./calendar";
 
 const seasonOrder: SeasonKind[] = ["spring", "summer", "autumn", "winter"];
 
@@ -22,6 +23,10 @@ function territoryIdForFaction(factionId: Id): Id {
 
 function currentSeason(day: number): SeasonKind {
   return seasonOrder[Math.floor(Math.max(0, day - 1) / 30) % seasonOrder.length];
+}
+
+function nextSeasonTickForDay(day: number): number {
+  return (Math.floor((Math.max(1, day) - 1) / 30) + 1) * 30 * TICKS_PER_DAY;
 }
 
 function settlementIdsForFaction(world: World, factionId: Id): Id[] {
@@ -149,7 +154,7 @@ export function createWeatherSystem(world: World, rng: Rng): WeatherSystem {
   const weather: WeatherSystem = {
     season: currentSeason(world.day),
     fronts: {},
-    nextSeasonTick: (Math.floor((world.day - 1) / 30) + 1) * 30 * 6
+    nextSeasonTick: nextSeasonTickForDay(world.day)
   };
   world.weather = weather;
   const regionIds = Object.keys(world.planet.regions);
@@ -173,7 +178,10 @@ export function ensureTerritoriesAndWeather(world: World, rng: Rng): void {
   } else {
     world.weather.season ??= currentSeason(world.day);
     world.weather.fronts ??= {};
-    world.weather.nextSeasonTick = Number.isFinite(world.weather.nextSeasonTick) ? world.weather.nextSeasonTick : (Math.floor((world.day - 1) / 30) + 1) * 30 * 6;
+    world.weather.nextSeasonTick =
+      Number.isFinite(world.weather.nextSeasonTick) && world.weather.nextSeasonTick >= TICKS_PER_DAY
+        ? world.weather.nextSeasonTick
+        : nextSeasonTickForDay(world.day);
   }
 }
 

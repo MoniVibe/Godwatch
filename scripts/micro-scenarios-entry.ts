@@ -9,6 +9,7 @@ import { classifyRelationStance, deriveLoyaltyState, derivePersonEmotionalState 
 import { summarizeBandEmotionalClimate } from "../src/sim/society/emotionalClimate";
 import { createWardFromConquest } from "../src/sim/society/family";
 import { collectTelemetry, validateWorld } from "../src/sim/telemetry";
+import { deriveWorldClock, TICKS_PER_DAY, TICKS_PER_HOUR } from "../src/sim/world/calendar";
 import {
   advanceSettlementConstruction,
   buildingCatalog,
@@ -254,7 +255,7 @@ results.push(
     world.planet.holdings[holding.id] = holding;
 
     world.quests = {};
-    world.tick = 11;
+    world.tick = TICKS_PER_DAY * 2 - 1;
     world.day = 2;
     feature.holdingId = holding.id;
     feature.status = "claimed";
@@ -499,6 +500,30 @@ results.push(
     assertValid(world, "render snapshot selected band position scenario");
 
     return `${band.name}: ${bandEntity.anchorKind} ${bandEntity.x.toFixed(3)},${bandEntity.y.toFixed(3)} selected ${snapshot.selections.bandId}`;
+  })
+);
+
+results.push(
+  scenario("world clock uses 360 ticks per day", () => {
+    const dawn = deriveWorldClock(0);
+    const hourOne = deriveWorldClock(TICKS_PER_HOUR);
+    const dusk = deriveWorldClock(TICKS_PER_HOUR * 12);
+    const nextDay = deriveWorldClock(TICKS_PER_DAY);
+    const world = createWorld("micro-world-clock-cadence");
+    tickWorld(world, TICKS_PER_HOUR);
+    const snapshot = createRenderSnapshot(world, { mode: "world", overlay: "biomes" });
+
+    assert(TICKS_PER_DAY === 360, `Expected 360 ticks per day, got ${TICKS_PER_DAY}.`);
+    assert(TICKS_PER_HOUR === 15, `Expected 15 ticks per hour, got ${TICKS_PER_HOUR}.`);
+    assert(dawn.day === 1 && dawn.timeLabel === "06:00" && dawn.phase === "dawn", `Expected tick 0 dawn at 06:00, got ${dawn.phase} ${dawn.timeLabel}.`);
+    assert(hourOne.day === 1 && hourOne.timeLabel === "07:00" && hourOne.phase === "day", `Expected tick 15 day at 07:00, got ${hourOne.phase} ${hourOne.timeLabel}.`);
+    assert(dusk.timeLabel === "18:00" && dusk.phase === "dusk", `Expected half-day to be dusk at 18:00, got ${dusk.phase} ${dusk.timeLabel}.`);
+    assert(nextDay.day === 2 && nextDay.tickInDay === 0 && nextDay.timeLabel === "06:00", `Expected tick 360 to wrap to day 2 dawn, got day ${nextDay.day} ${nextDay.timeLabel}.`);
+    assert(world.tick === TICKS_PER_HOUR && world.day === 1, `Expected first simulated hour to stay on day 1, got day ${world.day} tick ${world.tick}.`);
+    assert(snapshot.clock.timeLabel === "07:00" && snapshot.clock.phase === "day", "Expected render snapshot clock to mirror shared cadence.");
+    assertValid(world, "world clock cadence scenario");
+
+    return `${TICKS_PER_DAY}/day; tick ${world.tick} ${snapshot.clock.dayLabel} ${snapshot.clock.timeLabel} ${snapshot.clock.phase}`;
   })
 );
 

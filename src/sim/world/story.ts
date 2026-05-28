@@ -5,6 +5,7 @@ import { familyNames } from "../data/content";
 import { autoEquip, ensureItem, rememberItem } from "../economy/items";
 import { makeItemProvenance } from "../economy/recipes";
 import { biomeAtSettlement } from "../environment/planet";
+import { TICKS_PER_DAY } from "./calendar";
 import type {
   Band,
   CrisisKind,
@@ -765,7 +766,7 @@ function updateEmergingLegendHooks(world: World, rng: Rng): void {
 
 export function updateStoryEngine(world: World, rng: Rng): void {
   ensureStoryState(world, rng);
-  if (world.tick % 6 !== 0) {
+  if (world.tick % TICKS_PER_DAY !== 0) {
     return;
   }
   updateBosses(world, rng);

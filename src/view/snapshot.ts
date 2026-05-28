@@ -1,4 +1,5 @@
 import { collectOccupancySnapshot, type EntityPositionSnapshot, type OccupancyBucket, type WorldOccupancySnapshot } from "../sim/world/occupancy";
+import { deriveWorldClock, type WorldClockSnapshot } from "../sim/world/calendar";
 import type {
   Id,
   LingeringEffect,
@@ -66,6 +67,7 @@ export interface LocalBuildingFootprintSnapshot {
 export interface RenderSnapshot {
   tick: number;
   day: number;
+  clock: WorldClockSnapshot;
   mode: RenderMode;
   camera: RenderCameraSnapshot;
   selections: RenderSelectionSnapshot;
@@ -172,6 +174,7 @@ export function createRenderSnapshot(world: World, options: RenderSnapshotOption
   return {
     tick: world.tick,
     day: world.day,
+    clock: deriveWorldClock(world.tick, { day: world.day }),
     mode,
     camera: cameraFor(world, mode, overlay, selectedSettlement, options.camera),
     selections: {
@@ -195,6 +198,8 @@ export function snapshotDebugSummary(snapshot: RenderSnapshot): Record<string, n
   return {
     tick: snapshot.tick,
     day: snapshot.day,
+    time: snapshot.clock.timeLabel,
+    phase: snapshot.clock.phase,
     mode: snapshot.camera.mode,
     overlay: snapshot.camera.overlay,
     settlementId: snapshot.selections.settlementId,
