@@ -20,7 +20,7 @@ Repo: `C:\dev\godwatch`
 - Tranche / slice: T2 map marker semantics, zoom-filtered legend, and hover copy
 - Status: DONE
 - Tests: npm run check -> PASS; browser check at http://127.0.0.1:5173 -> PASS
-- Commit: f59fbbb pushed: pending
+- Commit: f59fbbb pushed: yes (`origin/nightly/godwatch-legibility`)
 - Lanes: systems=none, visual=done, micro=done, scout=done
 - Files touched: `.nightly/PROGRESS.md`, `src/view/mapSemantics.ts`, `src/main.ts`, `src/styles.css`, `scripts/micro-scenarios-entry.ts`
 - Next run: Add route/effect hover hit-testing or move map legend/hover selectors further out of `main.ts` into `src/view`/`src/render` without changing sim truth.
