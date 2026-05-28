@@ -2772,16 +2772,131 @@ function drawWeatherFronts(context: CanvasRenderingContext2D, width: number, hei
   context.restore();
 }
 
-function drawLingeringEffect(context: CanvasRenderingContext2D, effect: LingeringEffect, width: number, height: number): void {
-  const x = effect.x * width;
-  const y = effect.y * height;
-  const life = clampNumber(effect.remainingTicks / effect.durationTicks, 0, 1);
-  const radius = effect.radius * (effect.kind === "impact" || effect.kind === "area" ? 0.72 + effect.progress * 0.28 : 1);
+interface ProjectedLingeringEffect {
+  effect: LingeringEffect;
+  x: number;
+  y: number;
+  targetX?: number;
+  targetY?: number;
+  radius: number;
+}
+
+function lingeringEffectLife(effect: LingeringEffect): number {
+  return clampNumber(effect.remainingTicks / Math.max(1, effect.durationTicks), 0, 1);
+}
+
+function lingeringEffectRadius(effect: LingeringEffect): number {
+  const baseRadius = Math.max(4, effect.radius);
+  return baseRadius * (effect.kind === "impact" || effect.kind === "area" ? 0.72 + effect.progress * 0.28 : 1);
+}
+
+function projectLingeringEffect(effect: LingeringEffect, width: number, height: number, settlement?: Settlement): ProjectedLingeringEffect | undefined {
+  const radius = lingeringEffectRadius(effect);
+  if (!settlement) {
+    return {
+      effect,
+      x: effect.x * width,
+      y: effect.y * height,
+      targetX: effect.targetX === undefined ? undefined : effect.targetX * width,
+      targetY: effect.targetY === undefined ? undefined : effect.targetY * height,
+      radius
+    };
+  }
+  if (effect.locationId !== settlement.id) {
+    return undefined;
+  }
+
+  const centerX = width * 0.5;
+  const centerY = height * 0.5;
+  const dx = clampNumber(effect.x - settlement.x, -0.13, 0.13);
+  const dy = clampNumber(effect.y - settlement.y, -0.13, 0.13);
+  const targetDx = effect.targetX === undefined ? undefined : clampNumber(effect.targetX - settlement.x, -0.13, 0.13);
+  const targetDy = effect.targetY === undefined ? undefined : clampNumber(effect.targetY - settlement.y, -0.13, 0.13);
+  return {
+    effect,
+    x: centerX + dx * width,
+    y: centerY + dy * height,
+    targetX: targetDx === undefined ? undefined : centerX + targetDx * width,
+    targetY: targetDy === undefined ? undefined : centerY + targetDy * height,
+    radius
+  };
+}
+
+function lingeringEffectSourceName(effect: LingeringEffect): string {
+  const actors = effect.actorIds
+    .map((id) => world.persons[id])
+    .filter((person): person is Person => Boolean(person))
+    .map(formatPersonName);
+  if (actors.length > 0) {
+    return actors.length > 2 ? `${actors.slice(0, 2).join(", ")} +${actors.length - 2}` : actors.join(", ");
+  }
+  const factions = effect.factionIds
+    .map((id) => world.factions[id])
+    .filter((faction): faction is Faction => Boolean(faction))
+    .map((faction) => faction.name);
+  if (factions.length > 0) {
+    return factions.length > 2 ? `${factions.slice(0, 2).join(", ")} +${factions.length - 2}` : factions.join(", ");
+  }
+  return effect.locationId ? (world.settlements[effect.locationId]?.name ?? "unknown source") : "unknown source";
+}
+
+function lingeringEffectSourceCode(effect: LingeringEffect): string {
+  const actor = effect.actorIds.map((id) => world.persons[id]).find((person): person is Person => Boolean(person));
+  if (actor) {
+    return `${actor.name.slice(0, 1)}${actor.familyName.slice(0, 1)}`.toUpperCase();
+  }
+  const faction = effect.factionIds.map((id) => world.factions[id]).find((candidate): candidate is Faction => Boolean(candidate));
+  if (faction) {
+    return faction.name
+      .split(/\s+/)
+      .map((part) => part.slice(0, 1))
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  }
+  return "?";
+}
+
+function lingeringEffectKindCode(kind: LingeringEffect["kind"]): string {
+  if (kind === "area") return "AO";
+  if (kind === "impact") return "IM";
+  if (kind === "projectile") return "PR";
+  if (kind === "charge") return "CH";
+  if (kind === "trail") return "TR";
+  if (kind === "weather-remnant") return "WX";
+  return "ST";
+}
+
+function drawLingeringEffectBadge(context: CanvasRenderingContext2D, effect: LingeringEffect, x: number, y: number, radius: number, life: number): void {
+  const label = `${lingeringEffectKindCode(effect.kind)}:${lingeringEffectSourceCode(effect)}`;
+  context.save();
+  context.font = "800 10px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  const width = Math.max(24, context.measureText(label).width + 8);
+  const badgeX = x;
+  const badgeY = y - Math.min(radius * 0.78, 46) - 10;
+  context.globalAlpha = clampNumber(0.58 + life * 0.28, 0.58, 0.86);
+  context.fillStyle = "rgba(13, 16, 14, 0.82)";
+  context.strokeStyle = effect.color;
+  context.lineWidth = 1.1;
+  context.beginPath();
+  context.roundRect(badgeX - width / 2, badgeY - 8, width, 16, 5);
+  context.fill();
+  context.stroke();
+  context.fillStyle = "#f4ead8";
+  context.fillText(label, badgeX, badgeY + 0.5);
+  context.restore();
+}
+
+function drawLingeringEffect(context: CanvasRenderingContext2D, projected: ProjectedLingeringEffect): void {
+  const { effect, x, y, radius } = projected;
+  const life = lingeringEffectLife(effect);
   context.save();
   context.globalAlpha = effect.kind === "area" || effect.kind === "impact" ? clampNumber(0.12 + life * 0.18, 0, 0.34) : clampNumber(0.18 + life * 0.62, 0, 0.82);
   if (effect.kind === "projectile" || effect.kind === "charge") {
-    const targetX = (effect.targetX ?? effect.x) * width;
-    const targetY = (effect.targetY ?? effect.y) * height;
+    const targetX = projected.targetX ?? x;
+    const targetY = projected.targetY ?? y;
     context.beginPath();
     context.strokeStyle = effect.color;
     context.lineWidth = effect.kind === "charge" ? 5 : 3;
@@ -2826,12 +2941,20 @@ function drawLingeringEffect(context: CanvasRenderingContext2D, effect: Lingerin
     context.stroke();
   }
   context.restore();
+  drawLingeringEffectBadge(context, effect, x, y, radius, life);
 }
 
-function drawLingeringEffects(context: CanvasRenderingContext2D, width: number, height: number, effects: readonly LingeringEffect[]): void {
-  [...effects]
-    .sort((a, b) => a.kind.localeCompare(b.kind))
-    .forEach((effect) => drawLingeringEffect(context, effect, width, height));
+function projectedLingeringEffects(width: number, height: number, effects: readonly LingeringEffect[], settlement?: Settlement): ProjectedLingeringEffect[] {
+  return [...effects]
+    .sort((a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id))
+    .map((effect) => projectLingeringEffect(effect, width, height, settlement))
+    .filter((effect): effect is ProjectedLingeringEffect => Boolean(effect));
+}
+
+function drawLingeringEffects(context: CanvasRenderingContext2D, width: number, height: number, effects: readonly LingeringEffect[], settlement?: Settlement): void {
+  for (const effect of projectedLingeringEffects(width, height, effects, settlement)) {
+    drawLingeringEffect(context, effect);
+  }
 }
 
 function routeStroke(route: TravelRoute): string {
@@ -3365,6 +3488,42 @@ function nearestLocalTileAt(point: CanvasPoint, width: number, height: number, s
   return nearest && nearestDistance <= nearest.radius * 1.05 ? nearest.tile : undefined;
 }
 
+function distanceToSegment(point: CanvasPoint, start: CanvasPoint, end: CanvasPoint): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared <= 0) {
+    return Math.hypot(point.x - start.x, point.y - start.y);
+  }
+  const t = clampNumber(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared, 0, 1);
+  const x = start.x + dx * t;
+  const y = start.y + dy * t;
+  return Math.hypot(point.x - x, point.y - y);
+}
+
+function nearestLingeringEffectAt(
+  point: CanvasPoint,
+  width: number,
+  height: number,
+  effects: readonly LingeringEffect[],
+  settlement?: Settlement
+): LingeringEffect | undefined {
+  let nearest: LingeringEffect | undefined;
+  let nearestScore = Number.POSITIVE_INFINITY;
+  for (const projected of projectedLingeringEffects(width, height, effects, settlement)) {
+    const isTraveling = projected.effect.kind === "projectile" || projected.effect.kind === "charge";
+    const distance = isTraveling
+      ? distanceToSegment(point, { x: projected.x, y: projected.y }, { x: projected.targetX ?? projected.x, y: projected.targetY ?? projected.y })
+      : Math.hypot(projected.x - point.x, projected.y - point.y);
+    const hitRadius = isTraveling ? Math.max(18, projected.radius * 0.72) : Math.max(18, projected.radius * 0.94);
+    if (distance <= hitRadius && distance < nearestScore) {
+      nearestScore = distance;
+      nearest = projected.effect;
+    }
+  }
+  return nearest;
+}
+
 function focusSettlementOnMap(settlement: Settlement): void {
   selectedMapSettlementId = settlement.id;
   selectedFactionId = settlement.factionId;
@@ -3452,11 +3611,27 @@ function renderRegionTileHover(tile: World["geography"]["tiles"][string]): strin
   `;
 }
 
+function renderLingeringEffectHover(effect: LingeringEffect): string {
+  const location = effect.locationId ? world.settlements[effect.locationId] : undefined;
+  const tags = effect.tags.length ? effect.tags.slice(0, 5).join(", ") : "none";
+  return `
+    <strong>${escapeHtml(effect.name)}</strong>
+    <small>${escapeHtml(`${titleLabel(effect.kind)} · source ${lingeringEffectSourceName(effect)}`)}</small>
+    <small>${escapeHtml(`remaining ${Math.max(0, effect.remainingTicks)}/${effect.durationTicks} ticks · intensity ${Math.round(effect.intensity)} · radius ${Math.round(effect.radius)}`)}</small>
+    <small>${escapeHtml(`${location ? `${location.name} · ` : ""}tags ${tags}`)}</small>
+  `;
+}
+
 function renderMapHoverAt(canvas: HTMLCanvasElement, event: MouseEvent): string {
   const point = canvasPointFromEvent(canvas, event);
   if (atlasZoom === "local") {
-    const tile = nearestLocalTileAt(point, canvas.width, canvas.height, selectedSettlement());
-    return tile ? renderRegionTileHover(tile) : renderSettlementHover(selectedSettlement());
+    const settlement = selectedSettlement();
+    const effect = nearestLingeringEffectAt(point, canvas.width, canvas.height, currentRenderSnapshot().effects, settlement);
+    if (effect) {
+      return renderLingeringEffectHover(effect);
+    }
+    const tile = nearestLocalTileAt(point, canvas.width, canvas.height, settlement);
+    return tile ? renderRegionTileHover(tile) : renderSettlementHover(settlement);
   }
   if (atlasZoom === "region") {
     const sector = nearestRegionSectorAt(point, canvas.width, canvas.height, selectedSettlement()) ?? sectorForSettlement(selectedSettlement());
@@ -3492,8 +3667,9 @@ function renderMap(): void {
   context.clearRect(0, 0, width, height);
 
   if (atlasZoom === "local") {
-    drawLocalAtlas(context, width, height, selectedSettlement(), labels);
-    drawLingeringEffects(context, width, height, snapshot.effects);
+    const settlement = selectedSettlement();
+    drawLocalAtlas(context, width, height, settlement, labels);
+    drawLingeringEffects(context, width, height, snapshot.effects, settlement);
     drawMapLabels(context, labels, width, height);
     return;
   }

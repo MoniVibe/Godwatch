@@ -15,6 +15,17 @@ Repo: `C:\dev\godwatch`
 
 ## Runs
 
+## Run 2026-05-28T00:02:10Z
+- Branch / HEAD: nightly/godwatch-legibility / 8c0f658
+- Tranche / slice: T2 local lingering effect legibility and settlement-scoped projection
+- Status: DONE
+- Tests: npm run check -> PASS
+- Commit: pending
+- Lanes: systems=none, visual=done, micro=smoke+scenarios pass
+- Files touched: `.nightly/PROGRESS.md`, `src/main.ts`
+- Next run: Render individual local actors/casters as first-class pawns so effect source, combatant, work, and skill activity become visible without relying on AoE badges.
+- Blockers: none.
+
 ## Run 2026-05-27T23:52:21Z
 - Branch / HEAD: nightly/godwatch-legibility / 48f7aa9
 - Tranche / slice: T2 aligned world hex ground projection
