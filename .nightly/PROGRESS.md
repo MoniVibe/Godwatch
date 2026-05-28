@@ -15,6 +15,17 @@ Repo: `C:\dev\godwatch`
 
 ## Runs
 
+## Run 2026-05-28T01:44:17Z
+- Branch / HEAD: nightly/godwatch-legibility / 6346c04
+- Tranche / slice: T2 world band visual easing and quieter route context
+- Status: DONE
+- Tests: npm run check -> PASS; browser check at http://127.0.0.1:5173 -> PASS
+- Commit: recorded in this commit; pushed: pending
+- Lanes: systems=none, visual=done, micro=check+browser
+- Files touched: `.nightly/PROGRESS.md`, `src/main.ts`
+- Next run: Add explicit world marker semantics/legend and hover copy for bands, settlements, route danger, claims, weather, crises, and lingering effects.
+- Blockers: none.
+
 ## Run 2026-05-28T01:26:36Z
 - Branch / HEAD: nightly/godwatch-legibility / db10ed6
 - Tranche / slice: T2 dense planet edge masks and traveling-band projection fix

@@ -106,6 +106,15 @@ let pendingRender = false;
 let timer: number | undefined;
 const planetSurfaceYaw = -Math.PI * 0.08;
 
+interface VisualBandPoint extends CanvasPoint {
+  anchorSignature: string;
+  tick: number;
+}
+
+const worldBandVisualPoints = new Map<string, VisualBandPoint>();
+let mapMotionFrame: number | undefined;
+let mapMotionFramesRemaining = 0;
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("Missing app root.");
@@ -3528,7 +3537,7 @@ function drawRoute(context: CanvasRenderingContext2D, route: TravelRoute, width:
   const selectedRoute = selectedBand().travel?.routeId === route.id;
   const selectedEndpoint = from.id === selectedSettlement().id || to.id === selectedSettlement().id;
   const depthAlpha = fromProjection && toProjection ? Math.min(planetDepthAlpha(fromProjection, 0.04), planetDepthAlpha(toProjection, 0.04)) : 1;
-  const worldRouteAlpha = selectedRoute ? 1 : selectedEndpoint ? 0.72 : 0.46;
+  const worldRouteAlpha = selectedRoute ? 1 : selectedEndpoint ? 0.42 : 0.18;
   context.save();
   context.globalAlpha = atlasZoom === "world" ? depthAlpha * worldRouteAlpha : 1;
   context.lineCap = "round";
@@ -3542,7 +3551,7 @@ function drawRoute(context: CanvasRenderingContext2D, route: TravelRoute, width:
 
   context.beginPath();
   context.strokeStyle = routeStroke(route);
-  context.lineWidth = atlasZoom === "world" ? (selectedRoute ? 2.2 : 1.2) : route.passDifficulty > 66 ? 2.6 : route.danger > 58 ? 2.2 : 1.4;
+  context.lineWidth = atlasZoom === "world" ? (selectedRoute ? 2.2 : 0.9) : route.passDifficulty > 66 ? 2.6 : route.danger > 58 ? 2.2 : 1.4;
   context.moveTo(a.x, a.y);
   context.lineTo(b.x, b.y);
   context.stroke();
@@ -3776,7 +3785,35 @@ function snapshotBandEntities(snapshot: RenderSnapshot): BandEntitySnapshot[] {
   return snapshot.entities.filter((entity) => entity.subjectKind === "band" && Boolean(world.bands[entity.subjectId]));
 }
 
-function projectedBandFromSnapshot(entity: BandEntitySnapshot, width: number, height: number): ProjectedBand | undefined {
+function bandAnchorSignature(entity: BandEntitySnapshot): string {
+  return [entity.anchorKind, entity.routeId ?? "", entity.originLocationId ?? "", entity.targetLocationId ?? "", entity.settlementId ?? "", entity.tileId ?? ""].join(":");
+}
+
+function displayedWorldBandPoint(band: Band, entity: BandEntitySnapshot, target: CanvasPoint, smooth: boolean): CanvasPoint {
+  const signature = bandAnchorSignature(entity);
+  const previous = worldBandVisualPoints.get(band.id);
+  if (!smooth) {
+    return previous?.anchorSignature === signature ? { x: previous.x, y: previous.y } : target;
+  }
+
+  const distance = previous ? Math.hypot(target.x - previous.x, target.y - previous.y) : Number.POSITIVE_INFINITY;
+  if (!previous || previous.anchorSignature !== signature || distance > 180) {
+    worldBandVisualPoints.set(band.id, { ...target, anchorSignature: signature, tick: world.tick });
+    return target;
+  }
+
+  const factor = entity.anchorKind === "route" ? 0.11 : 0.24;
+  const next = {
+    x: previous.x + (target.x - previous.x) * factor,
+    y: previous.y + (target.y - previous.y) * factor,
+    anchorSignature: signature,
+    tick: world.tick
+  };
+  worldBandVisualPoints.set(band.id, next);
+  return { x: next.x, y: next.y };
+}
+
+function projectedBandFromSnapshot(entity: BandEntitySnapshot, width: number, height: number, smooth = false): ProjectedBand | undefined {
   const band = world.bands[entity.subjectId];
   if (!band) {
     return undefined;
@@ -3789,7 +3826,7 @@ function projectedBandFromSnapshot(entity: BandEntitySnapshot, width: number, he
     return {
       band,
       entity,
-      point: { x: projection.x, y: projection.y },
+      point: displayedWorldBandPoint(band, entity, { x: projection.x, y: projection.y }, smooth),
       depthAlpha: planetDepthAlpha(projection, 0.1)
     };
   }
@@ -3801,9 +3838,9 @@ function projectedBandFromSnapshot(entity: BandEntitySnapshot, width: number, he
   };
 }
 
-function projectedSnapshotBands(snapshot: RenderSnapshot, width: number, height: number): ProjectedBand[] {
+function projectedSnapshotBands(snapshot: RenderSnapshot, width: number, height: number, smooth = false): ProjectedBand[] {
   return snapshotBandEntities(snapshot)
-    .map((entity) => projectedBandFromSnapshot(entity, width, height))
+    .map((entity) => projectedBandFromSnapshot(entity, width, height, smooth))
     .filter((projected): projected is ProjectedBand => Boolean(projected));
 }
 
@@ -3928,7 +3965,7 @@ function drawFeatures(context: CanvasRenderingContext2D, width: number, height: 
 }
 
 function drawBands(context: CanvasRenderingContext2D, width: number, height: number, labels: MapLabel[], snapshot: RenderSnapshot, focusOnly = false): void {
-  for (const projected of projectedSnapshotBands(snapshot, width, height)) {
+  for (const projected of projectedSnapshotBands(snapshot, width, height, true)) {
     const { band, point, depthAlpha } = projected;
     const isFavored = band.id === world.deity.favoredBandId;
     const isSelected = band.id === snapshot.selections.bandId;
@@ -4236,16 +4273,18 @@ function renderMap(): void {
   const selectedRouteId = selectedBand().travel?.routeId;
   const selectedSettlementId = snapshot.selections.settlementId;
   const visibleRoutes = snapshot.routes
-    .map((route) => ({
-      route,
-      score:
-        (route.id === selectedRouteId ? 1000 : 0) +
-        (route.fromId === selectedSettlementId || route.toId === selectedSettlementId ? 160 : 0) +
-        route.danger * 1.2 +
-        route.passDifficulty
-    }))
+    .map((route) => {
+      const selectedRoute = route.id === selectedRouteId;
+      const selectedEndpoint = route.fromId === selectedSettlementId || route.toId === selectedSettlementId;
+      return {
+        route,
+        visible: selectedRoute || selectedEndpoint,
+        score: (selectedRoute ? 1000 : 0) + (selectedEndpoint ? 160 : 0) + route.danger * 1.2 + route.passDifficulty
+      };
+    })
+    .filter(({ visible }) => visible)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 6);
+    .slice(0, selectedRouteId ? 5 : 4);
   for (const { route } of visibleRoutes) {
     drawRoute(context, route, width, height);
   }
@@ -4284,6 +4323,38 @@ function requestRender(): void {
   render();
 }
 
+function resetWorldBandVisuals(): void {
+  worldBandVisualPoints.clear();
+  mapMotionFramesRemaining = 0;
+  if (mapMotionFrame !== undefined) {
+    window.cancelAnimationFrame(mapMotionFrame);
+    mapMotionFrame = undefined;
+  }
+}
+
+function scheduleMapMotionFrames(frames = 18): void {
+  if (atlasZoom !== "world") {
+    return;
+  }
+  mapMotionFramesRemaining = Math.max(mapMotionFramesRemaining, frames);
+  if (mapMotionFrame !== undefined) {
+    return;
+  }
+
+  const animate = () => {
+    mapMotionFrame = undefined;
+    if (mapMotionFramesRemaining <= 0 || atlasZoom !== "world") {
+      mapMotionFramesRemaining = 0;
+      return;
+    }
+    mapMotionFramesRemaining -= 1;
+    renderMap();
+    mapMotionFrame = window.requestAnimationFrame(animate);
+  };
+
+  mapMotionFrame = window.requestAnimationFrame(animate);
+}
+
 function restartTimer(): void {
   if (timer !== undefined) {
     window.clearInterval(timer);
@@ -4295,6 +4366,7 @@ function restartTimer(): void {
     const speed = speeds[speedIndex];
     tickWorld(world, speed.steps);
     requestRender();
+    scheduleMapMotionFrames(speed.steps > 1 ? 24 : 18);
   }, speeds[speedIndex].ms);
 }
 
@@ -4351,6 +4423,7 @@ document.addEventListener("click", (event) => {
   }
   if (action === "step") {
     tickWorld(world, 1);
+    scheduleMapMotionFrames(18);
   }
   if (action === "cycle-speed") {
     speedIndex = (speedIndex + 1) % speeds.length;
@@ -4363,6 +4436,7 @@ document.addEventListener("click", (event) => {
     const loaded = loadWorld();
     if (loaded) {
       world = loaded;
+      resetWorldBandVisuals();
       worldGenDraft = { ...defaultWorldGenConfig(), ...world.generation };
       selectedFactionId = world.factions[selectedFactionId]?.id ?? Object.values(world.factions)[0]?.id ?? "";
       selectedOrganizationId = world.organizations?.[selectedOrganizationId]?.id ?? Object.keys(world.organizations ?? {})[0] ?? "";
@@ -4371,6 +4445,7 @@ document.addEventListener("click", (event) => {
   }
   if (action === "reset") {
     world = createWorld(`frontier-${Date.now()}`, worldGenDraft);
+    resetWorldBandVisuals();
     worldGenDraft = { ...world.generation };
     selectedFactionId = Object.values(world.factions)[0]?.id ?? "";
     selectedOrganizationId = Object.keys(world.organizations ?? {})[0] ?? "";
@@ -4379,6 +4454,7 @@ document.addEventListener("click", (event) => {
   }
   if (action === "generate-world") {
     world = createWorld(`frontier-${Date.now()}`, worldGenDraft);
+    resetWorldBandVisuals();
     worldGenDraft = { ...world.generation };
     selectedFactionId = Object.values(world.factions)[0]?.id ?? "";
     selectedOrganizationId = Object.keys(world.organizations ?? {})[0] ?? "";
@@ -4400,6 +4476,9 @@ document.addEventListener("click", (event) => {
   if (action === "set-atlas-zoom") {
     const zoom = actionButton.dataset.zoom;
     if (zoom === "world" || zoom === "region" || zoom === "local") {
+      if (atlasZoom !== zoom) {
+        resetWorldBandVisuals();
+      }
       atlasZoom = zoom;
     }
   }
