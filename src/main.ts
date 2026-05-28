@@ -2225,6 +2225,22 @@ function projectWorldSettlementProjection(settlement: Settlement, width: number,
 }
 
 function projectWorldEntityProjection(entity: BandEntitySnapshot, width: number, height: number): PlanetProjection {
+  if (entity.anchorKind === "route" && entity.originLocationId && entity.targetLocationId) {
+    const origin = world.settlements[entity.originLocationId];
+    const target = world.settlements[entity.targetLocationId];
+    if (origin && target) {
+      const from = projectWorldSettlementProjection(origin, width, height);
+      const to = projectWorldSettlementProjection(target, width, height);
+      const t = clampNumber(entity.progress ?? 0, 0, 1);
+      return {
+        x: from.x + (to.x - from.x) * t,
+        y: from.y + (to.y - from.y) * t,
+        z: from.z + (to.z - from.z) * t,
+        scale: from.scale + (to.scale - from.scale) * t,
+        visible: from.visible && to.visible
+      };
+    }
+  }
   const settlement = entity.settlementId ? world.settlements[entity.settlementId] : undefined;
   if (settlement) {
     return projectWorldSettlementProjection(settlement, width, height);
@@ -2593,10 +2609,7 @@ function planetHexCellColor(packet: UnknownRecord, overlay: AtlasOverlay): strin
 }
 
 function planetHexTerrainStroke(packet: UnknownRecord, overlay: AtlasOverlay): { color: string; width: number } {
-  if (overlay === "political" && (planetHexNumber(packet, ["borderMask"]) ?? 0) > 0) {
-    return { color: "rgba(244, 234, 216, 0.2)", width: 0.55 };
-  }
-  if (planetHexIsCoast(packet)) {
+  if (planetHexMask(packet, "coastMask") === 0 && planetHexIsCoast(packet)) {
     return { color: "rgba(216, 201, 158, 0.12)", width: 0.42 };
   }
   if (overlay === "threat") {
@@ -2605,17 +2618,125 @@ function planetHexTerrainStroke(packet: UnknownRecord, overlay: AtlasOverlay): {
   return { color: planetHexIsWater(packet) ? "rgba(216, 232, 223, 0.02)" : "rgba(244, 234, 216, 0.035)", width: 0.18 };
 }
 
+const planetHexMaskDirectionAngles = [0, -Math.PI / 3, (-Math.PI * 2) / 3, Math.PI, (Math.PI * 2) / 3, Math.PI / 3] as const;
+
+function planetHexMask(packet: UnknownRecord, key: string): number {
+  const value = planetHexNumber(packet, [key]);
+  return value !== undefined && value > 0 ? Math.trunc(value) & 0b111111 : 0;
+}
+
+function planetHexMaskDirections(mask: number): number[] {
+  const directions: number[] = [];
+  for (let index = 0; index < planetHexMaskDirectionAngles.length; index += 1) {
+    if ((mask & (1 << index)) !== 0) {
+      directions.push(index);
+    }
+  }
+  return directions;
+}
+
+function planetHexEdgeMidpoint(x: number, y: number, radius: number, directionIndex: number): CanvasPoint {
+  const angle = planetHexMaskDirectionAngles[directionIndex] ?? 0;
+  const edgeDistance = radius * Math.cos(Math.PI / 6);
+  return {
+    x: x + Math.cos(angle) * edgeDistance,
+    y: y + Math.sin(angle) * edgeDistance
+  };
+}
+
+function drawPlanetHexMaskEdgeStroke(
+  context: CanvasRenderingContext2D,
+  projected: ProjectedPlanetHex,
+  mask: number,
+  strokeStyle: string,
+  lineWidth: number,
+  lineDash: readonly number[] = []
+): void {
+  const { x, y, radius } = projected;
+  const cellRadius = radius * 1.02;
+  context.save();
+  context.strokeStyle = strokeStyle;
+  context.lineWidth = lineWidth;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.setLineDash([...lineDash]);
+  context.beginPath();
+  for (const directionIndex of planetHexMaskDirections(mask)) {
+    const angle = planetHexMaskDirectionAngles[directionIndex] ?? 0;
+    const midpoint = planetHexEdgeMidpoint(x, y, cellRadius, directionIndex);
+    const tangentX = Math.cos(angle + Math.PI / 2);
+    const tangentY = Math.sin(angle + Math.PI / 2);
+    const halfLength = cellRadius * 0.49;
+    context.moveTo(midpoint.x - tangentX * halfLength, midpoint.y - tangentY * halfLength);
+    context.lineTo(midpoint.x + tangentX * halfLength, midpoint.y + tangentY * halfLength);
+  }
+  context.stroke();
+  context.restore();
+}
+
+function drawPlanetHexMaskCenterStroke(
+  context: CanvasRenderingContext2D,
+  projected: ProjectedPlanetHex,
+  mask: number,
+  strokeStyle: string,
+  lineWidth: number
+): void {
+  const { x, y, radius } = projected;
+  const cellRadius = radius * 1.02;
+  context.save();
+  context.strokeStyle = strokeStyle;
+  context.lineWidth = lineWidth;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.beginPath();
+  for (const directionIndex of planetHexMaskDirections(mask)) {
+    const endpoint = planetHexEdgeMidpoint(x, y, cellRadius, directionIndex);
+    context.moveTo(x, y);
+    context.lineTo(endpoint.x, endpoint.y);
+  }
+  context.stroke();
+  context.restore();
+}
+
+function drawPlanetHexCoastMask(context: CanvasRenderingContext2D, projected: ProjectedPlanetHex, mask: number): void {
+  const lineWidth = Math.max(0.55, projected.radius * 0.09);
+  drawPlanetHexMaskEdgeStroke(context, projected, mask, "rgba(30, 54, 58, 0.22)", lineWidth * 2.1);
+  drawPlanetHexMaskEdgeStroke(context, projected, mask, "rgba(216, 201, 158, 0.34)", lineWidth);
+}
+
+function drawPlanetHexBorderMask(context: CanvasRenderingContext2D, projected: ProjectedPlanetHex, mask: number): void {
+  const lineWidth = Math.max(0.5, projected.radius * 0.07);
+  drawPlanetHexMaskEdgeStroke(context, projected, mask, "rgba(13, 16, 14, 0.34)", lineWidth * 1.9);
+  drawPlanetHexMaskEdgeStroke(context, projected, mask, "rgba(244, 234, 216, 0.34)", lineWidth, [projected.radius * 0.22, projected.radius * 0.14]);
+}
+
+function drawPlanetHexRiverMask(context: CanvasRenderingContext2D, projected: ProjectedPlanetHex, mask: number): void {
+  const lineWidth = Math.max(0.5, projected.radius * 0.065);
+  drawPlanetHexMaskCenterStroke(context, projected, mask, "rgba(12, 32, 40, 0.26)", lineWidth * 2.3);
+  drawPlanetHexMaskCenterStroke(context, projected, mask, "rgba(120, 168, 184, 0.34)", lineWidth);
+}
+
+function drawPlanetHexRoadMask(context: CanvasRenderingContext2D, projected: ProjectedPlanetHex, mask: number): void {
+  const lineWidth = Math.max(0.45, projected.radius * 0.055);
+  drawPlanetHexMaskCenterStroke(context, projected, mask, "rgba(13, 16, 14, 0.24)", lineWidth * 2.2);
+  drawPlanetHexMaskCenterStroke(context, projected, mask, "rgba(238, 226, 196, 0.28)", lineWidth);
+}
+
 function drawPlanetHexTerrainHints(context: CanvasRenderingContext2D, projected: ProjectedPlanetHex, overlay: AtlasOverlay): void {
   const { packet, x, y, radius } = projected;
   if (radius < 3.8) {
     return;
   }
   const token = planetHexTerrainToken(packet);
-  const riverMask = planetHexNumber(packet, ["riverMask"]);
-  const roadMask = planetHexNumber(packet, ["roadMask"]);
+  const coastMask = planetHexMask(packet, "coastMask");
+  const riverMask = planetHexMask(packet, "riverMask");
+  const roadMask = planetHexMask(packet, "roadMask");
+  const borderMask = planetHexMask(packet, "borderMask");
   const highGround = token.includes("mountain") || token.includes("ridge") || ["high", "alpine"].includes(planetHexString(packet, ["elevationBand", "heightBand"]) ?? "");
 
-  if (planetHexIsCoast(packet) && (overlay === "biomes" || overlay === "elevation")) {
+  if (coastMask > 0 && (overlay === "biomes" || overlay === "elevation")) {
+    drawPlanetHexCoastMask(context, projected, coastMask);
+  } else if (planetHexIsCoast(packet) && (overlay === "biomes" || overlay === "elevation")) {
     context.beginPath();
     context.strokeStyle = "rgba(216, 201, 158, 0.18)";
     context.lineWidth = Math.max(0.45, radius * 0.08);
@@ -2623,21 +2744,14 @@ function drawPlanetHexTerrainHints(context: CanvasRenderingContext2D, projected:
     context.quadraticCurveTo(x, y + radius * 0.06, x + radius * 0.46, y + radius * 0.28);
     context.stroke();
   }
-  if (riverMask !== undefined && riverMask > 0 && radius >= 4.4 && overlay !== "political") {
-    context.beginPath();
-    context.strokeStyle = "rgba(120, 168, 184, 0.2)";
-    context.lineWidth = Math.max(0.5, radius * 0.08);
-    context.moveTo(x - radius * 0.48, y - radius * 0.08);
-    context.quadraticCurveTo(x - radius * 0.04, y + radius * 0.22, x + radius * 0.46, y + radius * 0.02);
-    context.stroke();
+  if (riverMask > 0 && radius >= 4.4 && overlay !== "political") {
+    drawPlanetHexRiverMask(context, projected, riverMask);
   }
-  if (roadMask !== undefined && roadMask > 0 && radius >= 5.2 && overlay === "political") {
-    context.beginPath();
-    context.strokeStyle = "rgba(238, 226, 196, 0.18)";
-    context.lineWidth = Math.max(0.45, radius * 0.07);
-    context.moveTo(x - radius * 0.5, y);
-    context.lineTo(x + radius * 0.5, y);
-    context.stroke();
+  if (roadMask > 0 && radius >= 5.2 && overlay === "political") {
+    drawPlanetHexRoadMask(context, projected, roadMask);
+  }
+  if (borderMask > 0 && overlay === "political") {
+    drawPlanetHexBorderMask(context, projected, borderMask);
   }
   if (highGround && radius >= 5.4 && overlay !== "threat") {
     context.beginPath();
@@ -2666,6 +2780,12 @@ function drawDensePlanetHexTerrainLayer(context: CanvasRenderingContext2D, snaps
     }
     const stroke = planetHexTerrainStroke(projected.packet, overlay);
     drawTerrainHexCell(context, projected.x, projected.y, projected.radius * 1.02, planetHexCellColor(projected.packet, overlay), stroke.color, 0, stroke.width);
+  }
+  for (const projected of projectedHexes) {
+    const distance = Math.hypot(projected.x - centerX, projected.y - centerY);
+    if (distance > globeRadius + projected.radius * 0.65) {
+      continue;
+    }
     drawPlanetHexTerrainHints(context, projected, overlay);
   }
   context.restore();

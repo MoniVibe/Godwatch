@@ -9,7 +9,7 @@ import { classifyRelationStance, deriveLoyaltyState, derivePersonEmotionalState 
 import { summarizeBandEmotionalClimate } from "../src/sim/society/emotionalClimate";
 import { createWardFromConquest } from "../src/sim/society/family";
 import { collectTelemetry, validateWorld } from "../src/sim/telemetry";
-import { createPlanetHexGrid } from "../src/sim/environment/planetHexGrid";
+import { createPlanetHexGrid, PLANET_HEX_NEIGHBOR_DIRECTIONS } from "../src/sim/environment/planetHexGrid";
 import { deriveWorldClock, TICKS_PER_DAY, TICKS_PER_HOUR } from "../src/sim/world/calendar";
 import {
   advanceSettlementConstruction,
@@ -537,6 +537,25 @@ results.push(
     const after = JSON.stringify(world);
     const uniqueIds = new Set(grid.tiles.map((tile) => tile.id));
     const uniqueCoords = new Set(grid.tiles.map((tile) => `${tile.q},${tile.r}`));
+    const edgeMaskNames = ["coastMask", "borderMask", "roadMask", "riverMask"] as const;
+    type EdgeMaskName = (typeof edgeMaskNames)[number];
+    type DensePlanetTile = (typeof grid.tiles)[number] & Partial<Record<EdgeMaskName, unknown>>;
+    const maskValue = (tile: (typeof grid.tiles)[number], name: EdgeMaskName): unknown => (tile as DensePlanetTile)[name];
+    const hasAnyEdgeMask = (tile: (typeof grid.tiles)[number]): boolean =>
+      edgeMaskNames.some((name) => Object.prototype.hasOwnProperty.call(tile, name));
+    const maskDigest = (candidate: typeof grid): string =>
+      JSON.stringify(
+        candidate.tiles.map((tile) => {
+          const masked = tile as DensePlanetTile;
+          return `${tile.id}:${edgeMaskNames.map((name) => String(masked[name] ?? "missing")).join(":")}`;
+        })
+      );
+    const maskNumber = (tile: (typeof grid.tiles)[number], name: EdgeMaskName): number => {
+      const value = maskValue(tile, name);
+      assert(typeof value === "number" && Number.isFinite(value) && value >= 0, `Expected ${tile.id}.${name} to be a finite nonnegative number, got ${String(value)}.`);
+      assert(Number.isInteger(value) && value <= 0b111111, `Expected ${tile.id}.${name} to fit bounded 6-bit neighbor masks, got ${value}.`);
+      return value;
+    };
     const invalidTiles = grid.tiles.filter(
       (tile) =>
         !tile.id ||
@@ -579,6 +598,7 @@ results.push(
     let resolvedNeighborRefs = 0;
     let abruptKindIssues = 0;
     let biomeIssues = 0;
+    let edgeMaskDetail = "edge masks pending";
     const centerishTiles = grid.tiles.filter((tile) => tile.radialDistance <= 0.82);
     for (const tile of centerishTiles) {
       for (const neighborId of tile.neighborIds) {
@@ -599,6 +619,41 @@ results.push(
           biomeIssues += 1;
         }
       }
+    }
+    const edgeMasksExposed = grid.tiles.some(hasAnyEdgeMask);
+    if (edgeMasksExposed) {
+      let coastMaskTiles = 0;
+      let coastMaskEdges = 0;
+      assert(PLANET_HEX_NEIGHBOR_DIRECTIONS.length === 6, `Expected six dense planet neighbor directions, got ${PLANET_HEX_NEIGHBOR_DIRECTIONS.length}.`);
+      assert(maskDigest(grid) === maskDigest(repeat), "Expected dense planet edge masks to be deterministic for the same seed.");
+
+      for (const tile of grid.tiles) {
+        const tileMasks = {} as Record<EdgeMaskName, number>;
+        for (const name of edgeMaskNames) {
+          tileMasks[name] = maskNumber(tile, name);
+        }
+
+        let expectedCoastMask = 0;
+        for (let directionIndex = 0; directionIndex < PLANET_HEX_NEIGHBOR_DIRECTIONS.length; directionIndex += 1) {
+          const direction = PLANET_HEX_NEIGHBOR_DIRECTIONS[directionIndex];
+          assert(directionIndex < 6, `Expected neighbor direction bit ${directionIndex} to stay inside 6-bit masks.`);
+          const neighbor = grid.byCoord[`${tile.q + direction.q},${tile.r + direction.r}`];
+          if (!neighbor) {
+            continue;
+          }
+          if ((tile.kind === "ocean") !== (neighbor.kind === "ocean")) {
+            expectedCoastMask |= 1 << directionIndex;
+          }
+        }
+        assert(tileMasks.coastMask === expectedCoastMask, `Expected ${tile.id}.coastMask ${expectedCoastMask}, got ${tileMasks.coastMask}.`);
+        if (tileMasks.coastMask > 0) {
+          coastMaskTiles += 1;
+          coastMaskEdges += tileMasks.coastMask.toString(2).split("1").length - 1;
+        }
+      }
+
+      assert(coastMaskTiles > 0 && coastMaskEdges > 0, "Expected default dense planet seed to expose nonzero coast mask edges.");
+      edgeMaskDetail = `edge masks coast tiles ${coastMaskTiles}; coast edges ${coastMaskEdges}`;
     }
 
     assert(after === before, "Expected dense planet grid generation not to mutate world.");
@@ -621,7 +676,7 @@ results.push(
     assert(summarize(grid) === summarize(repeat), "Expected dense planet grid summary to be deterministic for the same seed.");
     assertValid(world, "dense planet grid scenario");
 
-    return `${grid.tileCount} hexes/${sectorCount} sectors; neighbors ${resolvedNeighborRefs}/${checkedNeighborRefs}; kind issues ${abruptKindIssues}; biome issues ${biomeIssues}`;
+    return `${grid.tileCount} hexes/${sectorCount} sectors; neighbors ${resolvedNeighborRefs}/${checkedNeighborRefs}; kind issues ${abruptKindIssues}; biome issues ${biomeIssues}; ${edgeMaskDetail}`;
   })
 );
 

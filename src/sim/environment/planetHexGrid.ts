@@ -2,7 +2,7 @@ import { biomeProfiles } from "../data/content";
 import { clamp } from "../core/math";
 import { hashSeed } from "../core/rng";
 import { climateFactorsFor } from "./climate";
-import type { BiomeKey, ElevationBand, Id, TerrainKind, World, WorldGenConfig, WorldGeography, WorldSector, WorldSize } from "../types";
+import type { BiomeKey, ElevationBand, Id, Settlement, TerrainKind, TravelRoute, World, WorldGenConfig, WorldGeography, WorldSector, WorldSize } from "../types";
 
 export type PlanetHexKind = WorldSector["kind"];
 
@@ -29,6 +29,12 @@ export interface PlanetHexTile extends PlanetHexCoord, PlanetHexTerrain {
   sampledSectorIds: readonly Id[];
   neighborIds: readonly Id[];
   neighborCoords: readonly PlanetHexCoord[];
+  coastMask: number;
+  riverMask: number;
+  roadMask: number;
+  borderMask: number;
+  coastDistance: number;
+  waterDepth: number;
 }
 
 export interface PlanetHexGridSourceSummary {
@@ -52,7 +58,8 @@ export interface PlanetHexGridOptions {
   seedKey?: string;
 }
 
-export type PlanetHexWorldSource = Pick<World, "geography" | "generation" | "seedName">;
+export type PlanetHexWorldSource = Pick<World, "geography" | "generation" | "seedName"> &
+  Partial<Pick<World, "planet" | "settlements">>;
 
 interface PlanetHexSectorSample {
   sector: WorldSector;
@@ -82,6 +89,26 @@ interface PlanetHexTileDraft extends PlanetHexCoord, PlanetHexTerrain {
   continentInfluence: number;
 }
 
+interface PlanetHexTileBase extends PlanetHexCoord, PlanetHexTerrain {
+  id: Id;
+  x: number;
+  y: number;
+  radialDistance: number;
+  nearestSectorId: Id;
+  sampledSectorIds: readonly Id[];
+  neighborIds: readonly Id[];
+  neighborCoords: readonly PlanetHexCoord[];
+}
+
+interface PlanetHexEdgeFields {
+  coastMask: number;
+  riverMask: number;
+  roadMask: number;
+  borderMask: number;
+  coastDistance: number;
+  waterDepth: number;
+}
+
 export const DEFAULT_PLANET_HEX_RADIUS = 14;
 
 export const PLANET_HEX_RADIUS_BY_WORLD_SIZE: Record<WorldSize, number> = {
@@ -98,6 +125,8 @@ export const PLANET_HEX_NEIGHBOR_DIRECTIONS: readonly PlanetHexCoord[] = [
   { q: -1, r: 1 },
   { q: 0, r: 1 }
 ];
+
+const PLANET_HEX_EDGE_BITS = PLANET_HEX_NEIGHBOR_DIRECTIONS.map((_, index) => 1 << index);
 
 const DEFAULT_WORLD_GEN_CONFIG: WorldGenConfig = {
   size: "small",
@@ -331,6 +360,275 @@ function isLandKind(kind: PlanetHexKind): boolean {
   return kind !== "ocean";
 }
 
+function edgeBit(index: number): number {
+  return PLANET_HEX_EDGE_BITS[index] ?? 0;
+}
+
+function neighborCoordAt(coord: PlanetHexCoord, directionIndex: number): PlanetHexCoord {
+  const direction = PLANET_HEX_NEIGHBOR_DIRECTIONS[directionIndex] ?? PLANET_HEX_NEIGHBOR_DIRECTIONS[0];
+  return { q: coord.q + direction.q, r: coord.r + direction.r };
+}
+
+function edgeIndexBetween(left: PlanetHexCoord, right: PlanetHexCoord): number {
+  const q = right.q - left.q;
+  const r = right.r - left.r;
+  return PLANET_HEX_NEIGHBOR_DIRECTIONS.findIndex((direction) => direction.q === q && direction.r === r);
+}
+
+function sortedSettlements(source: PlanetHexWorldSource | undefined): Settlement[] {
+  return Object.values(source?.settlements ?? {}).sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function sortedRoutes(source: PlanetHexWorldSource | undefined): TravelRoute[] {
+  return Object.values(source?.planet?.routes ?? {}).sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function dominantFactionIdForSettlements(settlementIds: readonly Id[], settlements: Readonly<Record<Id, Settlement>> | undefined): Id | undefined {
+  if (!settlements) {
+    return undefined;
+  }
+  const scores = new Map<Id, number>();
+  for (const settlementId of settlementIds) {
+    const settlement = settlements[settlementId];
+    if (!settlement?.factionId) {
+      continue;
+    }
+    scores.set(settlement.factionId, (scores.get(settlement.factionId) ?? 0) + Math.max(1, settlement.population));
+  }
+  return [...scores.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0];
+}
+
+function sectorClaimFactionIds(geography: WorldGeography, source: PlanetHexWorldSource | undefined): Readonly<Record<Id, Id>> {
+  const claims: Record<Id, Id> = {};
+  for (const sector of sortedSectors(geography)) {
+    const factionId = dominantFactionIdForSettlements(sector.settlementIds, source?.settlements);
+    if (factionId) {
+      claims[sector.id] = factionId;
+    }
+  }
+  return claims;
+}
+
+function sampledClaimFactionId(tile: PlanetHexTileBase, claimBySectorId: Readonly<Record<Id, Id>>): Id | undefined {
+  const scores = new Map<Id, number>();
+  const sectorIds = [tile.nearestSectorId, ...tile.sampledSectorIds];
+  for (let index = 0; index < sectorIds.length; index += 1) {
+    const factionId = claimBySectorId[sectorIds[index]];
+    if (!factionId) {
+      continue;
+    }
+    scores.set(factionId, (scores.get(factionId) ?? 0) + (index === 0 ? 3 : 1));
+  }
+  return [...scores.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0];
+}
+
+function coastEdgeMaskFor(tile: PlanetHexTileBase, byCoord: Readonly<Record<string, PlanetHexTileBase>>): number {
+  let mask = 0;
+  for (let index = 0; index < PLANET_HEX_NEIGHBOR_DIRECTIONS.length; index += 1) {
+    const neighbor = byCoord[planetHexCoordKey(neighborCoordAt(tile, index))];
+    if (neighbor && isLandKind(tile.kind) !== isLandKind(neighbor.kind)) {
+      mask |= edgeBit(index);
+    }
+  }
+  return mask;
+}
+
+function borderEdgeMaskFor(
+  tile: PlanetHexTileBase,
+  byCoord: Readonly<Record<string, PlanetHexTileBase>>,
+  claimBySectorId: Readonly<Record<Id, Id>>
+): number {
+  let mask = 0;
+  const tileClaim = sampledClaimFactionId(tile, claimBySectorId);
+  for (let index = 0; index < PLANET_HEX_NEIGHBOR_DIRECTIONS.length; index += 1) {
+    const neighbor = byCoord[planetHexCoordKey(neighborCoordAt(tile, index))];
+    if (!neighbor || !isLandKind(tile.kind) || !isLandKind(neighbor.kind) || tile.nearestSectorId === neighbor.nearestSectorId) {
+      continue;
+    }
+    const neighborClaim = sampledClaimFactionId(neighbor, claimBySectorId);
+    // Dense hexes do not carry an owner field yet. Settlement-derived faction claims win when present;
+    // otherwise this is an honest sector-boundary mask for the first political/territory pass.
+    if (tileClaim && neighborClaim ? tileClaim !== neighborClaim : true) {
+      mask |= edgeBit(index);
+    }
+  }
+  return mask;
+}
+
+function coastDistancesFor(
+  tiles: readonly PlanetHexTileBase[],
+  byCoord: Readonly<Record<string, PlanetHexTileBase>>,
+  coastMasks: Readonly<Record<Id, number>>
+): Readonly<Record<Id, number>> {
+  const fallbackDistance = Math.max(1, Math.ceil(Math.sqrt(tiles.length)));
+  const distances: Record<Id, number> = {};
+  const queue: PlanetHexTileBase[] = [];
+  for (const tile of tiles) {
+    const isCoastSeed = (coastMasks[tile.id] ?? 0) > 0 || tile.kind === "coast";
+    distances[tile.id] = isCoastSeed ? 0 : Number.POSITIVE_INFINITY;
+    if (isCoastSeed) {
+      queue.push(tile);
+    }
+  }
+
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const tile = queue[cursor];
+    const nextDistance = (distances[tile.id] ?? fallbackDistance) + 1;
+    for (const coord of tile.neighborCoords) {
+      const neighbor = byCoord[planetHexCoordKey(coord)];
+      if (neighbor && nextDistance < (distances[neighbor.id] ?? Number.POSITIVE_INFINITY)) {
+        distances[neighbor.id] = nextDistance;
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  for (const tile of tiles) {
+    if (!Number.isFinite(distances[tile.id])) {
+      distances[tile.id] = fallbackDistance;
+    }
+  }
+  return distances;
+}
+
+function waterDepthFor(tile: PlanetHexTileBase, coastDistance: number): number {
+  if (tile.kind !== "ocean") {
+    return 0;
+  }
+  return rounded(clamp(0.16 + coastDistance * 0.18, 0.16, 1), 4);
+}
+
+function nearestTileForPoint(tiles: readonly PlanetHexTileBase[], x: number, y: number): PlanetHexTileBase | undefined {
+  let best: PlanetHexTileBase | undefined;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const tile of tiles) {
+    const distance = Math.hypot((tile.x - x) * 1.08, tile.y - y);
+    const landPenalty = isLandKind(tile.kind) ? 0 : 0.035;
+    const score = distance + landPenalty;
+    if (score < bestScore || (score === bestScore && tile.id.localeCompare(best?.id ?? "") < 0)) {
+      best = tile;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function roundedAxial(q: number, r: number): PlanetHexCoord {
+  let roundedQ = Math.round(q);
+  let roundedR = Math.round(r);
+  let roundedS = Math.round(-q - r);
+  const qDiff = Math.abs(roundedQ - q);
+  const rDiff = Math.abs(roundedR - r);
+  const sDiff = Math.abs(roundedS + q + r);
+  if (qDiff > rDiff && qDiff > sDiff) {
+    roundedQ = -roundedR - roundedS;
+  } else if (rDiff > sDiff) {
+    roundedR = -roundedQ - roundedS;
+  } else {
+    roundedS = -roundedQ - roundedR;
+  }
+  return { q: roundedQ, r: roundedR };
+}
+
+function hexLineCoords(start: PlanetHexCoord, end: PlanetHexCoord): PlanetHexCoord[] {
+  const distance = planetHexDistance(start, end);
+  if (distance <= 0) {
+    return [{ q: start.q, r: start.r }];
+  }
+  const coords: PlanetHexCoord[] = [];
+  for (let step = 0; step <= distance; step += 1) {
+    const t = step / distance;
+    const coord = roundedAxial(start.q + (end.q - start.q) * t, start.r + (end.r - start.r) * t);
+    const previous = coords[coords.length - 1];
+    if (!previous || previous.q !== coord.q || previous.r !== coord.r) {
+      coords.push(coord);
+    }
+  }
+  return coords;
+}
+
+function addRoadEdgeMask(roadMasks: Record<Id, number>, left: PlanetHexTileBase, right: PlanetHexTileBase): void {
+  const edgeIndex = edgeIndexBetween(left, right);
+  if (edgeIndex < 0) {
+    return;
+  }
+  roadMasks[left.id] = (roadMasks[left.id] ?? 0) | edgeBit(edgeIndex);
+  roadMasks[right.id] = (roadMasks[right.id] ?? 0) | edgeBit((edgeIndex + 3) % PLANET_HEX_NEIGHBOR_DIRECTIONS.length);
+}
+
+function roadEdgeMasksFor(
+  tiles: readonly PlanetHexTileBase[],
+  byCoord: Readonly<Record<string, PlanetHexTileBase>>,
+  source: PlanetHexWorldSource | undefined
+): Readonly<Record<Id, number>> {
+  const roadMasks: Record<Id, number> = {};
+  const settlements = source?.settlements;
+  if (!settlements) {
+    return roadMasks;
+  }
+  const endpointBySettlementId = new Map<Id, PlanetHexTileBase>();
+  for (const settlement of sortedSettlements(source)) {
+    const tile = nearestTileForPoint(tiles, settlement.x, settlement.y);
+    if (tile) {
+      endpointBySettlementId.set(settlement.id, tile);
+    }
+  }
+
+  for (const route of sortedRoutes(source)) {
+    if (!settlements[route.fromId] || !settlements[route.toId]) {
+      continue;
+    }
+    const from = endpointBySettlementId.get(route.fromId);
+    const to = endpointBySettlementId.get(route.toId);
+    if (!from || !to) {
+      continue;
+    }
+    let previous: PlanetHexTileBase | undefined;
+    for (const coord of hexLineCoords(from, to)) {
+      const tile = byCoord[planetHexCoordKey(coord)];
+      if (!tile) {
+        continue;
+      }
+      if (previous && previous.id !== tile.id && isLandKind(previous.kind) && isLandKind(tile.kind)) {
+        addRoadEdgeMask(roadMasks, previous, tile);
+      }
+      previous = tile;
+    }
+  }
+  return roadMasks;
+}
+
+function derivePlanetHexEdgeFields(
+  tiles: readonly PlanetHexTileBase[],
+  byCoord: Readonly<Record<string, PlanetHexTileBase>>,
+  geography: WorldGeography,
+  source: PlanetHexWorldSource | undefined
+): Readonly<Record<Id, PlanetHexEdgeFields>> {
+  const claimBySectorId = sectorClaimFactionIds(geography, source);
+  const coastMasks: Record<Id, number> = {};
+  const borderMasks: Record<Id, number> = {};
+  for (const tile of tiles) {
+    coastMasks[tile.id] = coastEdgeMaskFor(tile, byCoord);
+    borderMasks[tile.id] = borderEdgeMaskFor(tile, byCoord, claimBySectorId);
+  }
+
+  const coastDistances = coastDistancesFor(tiles, byCoord, coastMasks);
+  const roadMasks = roadEdgeMasksFor(tiles, byCoord, source);
+  const fields: Record<Id, PlanetHexEdgeFields> = {};
+  for (const tile of tiles) {
+    const coastDistance = coastDistances[tile.id] ?? 0;
+    fields[tile.id] = {
+      coastMask: coastMasks[tile.id] ?? 0,
+      riverMask: 0,
+      roadMask: roadMasks[tile.id] ?? 0,
+      borderMask: borderMasks[tile.id] ?? 0,
+      coastDistance,
+      waterDepth: waterDepthFor(tile, coastDistance)
+    };
+  }
+  return fields;
+}
+
 function kindFromScores(
   nearestKind: PlanetHexKind,
   config: WorldGenConfig,
@@ -504,7 +802,7 @@ function correctedKindFor(draft: PlanetHexTileDraft, neighbors: readonly PlanetH
   return draft.kind;
 }
 
-function finalizeTile(draft: PlanetHexTileDraft, draftByCoord: Readonly<Record<string, PlanetHexTileDraft>>): PlanetHexTile {
+function finalizeTile(draft: PlanetHexTileDraft, draftByCoord: Readonly<Record<string, PlanetHexTileDraft>>): PlanetHexTileBase {
   const neighborCoords = neighborCoordsFor(draft, draftByCoord);
   const neighbors = neighborCoords.map((coord) => draftByCoord[planetHexCoordKey(coord)]).filter((neighbor): neighbor is PlanetHexTileDraft => Boolean(neighbor));
   const kind = correctedKindFor(draft, neighbors);
@@ -551,7 +849,13 @@ export function createPlanetHexGrid(
     draftByCoord[planetHexCoordKey(draft)] = draft;
   }
 
-  const tiles = drafts.map((draft) => finalizeTile(draft, draftByCoord));
+  const baseTiles = drafts.map((draft) => finalizeTile(draft, draftByCoord));
+  const baseByCoord: Record<string, PlanetHexTileBase> = {};
+  for (const tile of baseTiles) {
+    baseByCoord[planetHexCoordKey(tile)] = tile;
+  }
+  const edgeFields = derivePlanetHexEdgeFields(baseTiles, baseByCoord, geography, worldSource ? source : undefined);
+  const tiles = baseTiles.map((tile): PlanetHexTile => ({ ...tile, ...edgeFields[tile.id] }));
   const byId: Record<Id, PlanetHexTile> = {};
   const byCoord: Record<string, PlanetHexTile> = {};
   for (const tile of tiles) {
