@@ -1,4 +1,4 @@
-import { applyDueLocalCommands, emitLocalEvent, nextLocalId, queueLocalCommand, resourceAmount } from "./commands";
+import { applyDueLocalCommands, emitLocalEvent, mergeResource, nextLocalId, queueLocalCommand, resourceAmount } from "./commands";
 import { localManhattan, localTileId, nextLocalStepToward } from "./grid";
 import type {
   LocalCommand,
@@ -32,6 +32,7 @@ export function createLocalGameState(options: CreateLocalGameOptions = {}): Loca
     pawns: {},
     jobs: {},
     reservations: {},
+    stockpiles: {},
     commandQueue: [],
     events: []
   };
@@ -94,6 +95,9 @@ export function tickLocalGame(state: LocalGameState, steps = 1): void {
 export function validateLocalGameState(state: LocalGameState): string[] {
   const issues: string[] = [];
   for (const tile of Object.values(state.tiles)) {
+    if (tile.stockpileZoneId && !state.stockpiles[tile.stockpileZoneId]) {
+      issues.push(`${tile.id} points at missing stockpile ${tile.stockpileZoneId}.`);
+    }
     if (tile.resource && tile.resource.amount < 0) {
       issues.push(`${tile.id} has negative ${tile.resource.kind}.`);
     }
@@ -144,6 +148,23 @@ export function validateLocalGameState(state: LocalGameState): string[] {
     }
   }
 
+  for (const stockpile of Object.values(state.stockpiles)) {
+    if (stockpile.tileIds.length === 0) {
+      issues.push(`${stockpile.id} has no tiles.`);
+    }
+    if (stockpile.accepts.length === 0) {
+      issues.push(`${stockpile.id} accepts no resources.`);
+    }
+    for (const tileId of stockpile.tileIds) {
+      const tile = state.tiles[tileId];
+      if (!tile) {
+        issues.push(`${stockpile.id} points at missing tile ${tileId}.`);
+      } else if (tile.stockpileZoneId !== stockpile.id) {
+        issues.push(`${stockpile.id} tile ${tileId} does not point back at the zone.`);
+      }
+    }
+  }
+
   return issues;
 }
 
@@ -161,7 +182,11 @@ export function summarizeLocalGameState(state: LocalGameState): string {
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((job) => `${job.id}:${job.kind}:${job.status}`)
     .join(",");
-  return `tick=${state.tick};buildings=${completed};pawns=${pawns};jobs=${openJobs};events=${state.events.length}`;
+  const stockpiles = Object.values(state.stockpiles)
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((stockpile) => `${stockpile.id}:${stockpile.tileIds.length}:${stockpile.accepts.join("+")}`)
+    .join(",");
+  return `tick=${state.tick};buildings=${completed};pawns=${pawns};jobs=${openJobs};stockpiles=${stockpiles};events=${state.events.length}`;
 }
 
 function refreshDerivedLocalJobs(state: LocalGameState): void {
@@ -196,6 +221,7 @@ function refreshDerivedLocalJobs(state: LocalGameState): void {
       const job: LocalJob = {
         id: nextLocalId(state, "job"),
         kind: "haul",
+        purpose: "build-material",
         status: "open",
         priority: 70,
         targetTileId: tile.id,
@@ -216,6 +242,8 @@ function refreshDerivedLocalJobs(state: LocalGameState): void {
       });
     }
   }
+
+  refreshStockpileHaulJobs(state);
 }
 
 function tickPawn(state: LocalGameState, pawn: LocalPawn): void {
@@ -276,7 +304,13 @@ function canPawnClaimJob(state: LocalGameState, pawn: LocalPawn, job: LocalJob):
   if (job.kind === "haul") {
     const source = job.sourceTileId ? state.tiles[job.sourceTileId] : undefined;
     const target = state.tiles[job.targetTileId];
-    return Boolean(source?.resource && target?.blueprint && !reservationForTarget(state, source.id) && !reservationForTarget(state, `${target.id}:${job.resource}`));
+    const resource = job.resource;
+    if (!source?.resource || !target || !resource || source.resource.kind !== resource || source.resource.amount <= 0) {
+      return false;
+    }
+    const targetCanAccept = job.purpose === "stockpile" ? canAcceptStockpileDrop(state, target.id, resource) : Boolean(target.blueprint);
+    const targetReserved = job.purpose === "stockpile" ? reservationForStockpileTarget(state, target.id) : reservationForTarget(state, `${target.id}:${resource}`);
+    return Boolean(targetCanAccept && !reservationForTarget(state, source.id) && !targetReserved);
   }
   if (job.kind === "build") {
     const target = state.tiles[job.targetTileId];
@@ -325,18 +359,29 @@ function advanceHaul(state: LocalGameState, pawn: LocalPawn): void {
 
   const target = state.tiles[action.targetTileId];
   const carried = pawn.inventory;
-  if (!target?.blueprint || !carried || carried.kind !== action.resource) {
+  const job = state.jobs[action.jobId];
+  if (!job || !target || !carried || carried.kind !== action.resource) {
     blockJob(state, action.jobId, "missing-haul-target");
     pawn.action = undefined;
     pawn.inventory = undefined;
     return;
   }
-  addDeliveredResource(target.blueprint.delivered, carried);
+  const isStockpileHaul = job.purpose === "stockpile";
+  if (isStockpileHaul && canAcceptStockpileDrop(state, target.id, carried.kind)) {
+    target.resource = mergeResource(target.resource, carried);
+  } else if (!isStockpileHaul && target.blueprint) {
+    addDeliveredResource(target.blueprint.delivered, carried);
+  } else {
+    blockJob(state, action.jobId, "invalid-haul-target");
+    pawn.action = undefined;
+    pawn.inventory = undefined;
+    return;
+  }
   pawn.inventory = undefined;
   completeJob(state, action.jobId);
   pawn.action = undefined;
   emitLocalEvent(state, {
-    kind: "resource.delivered",
+    kind: isStockpileHaul ? "resource.stockpiled" : "resource.delivered",
     subjectId: target.id,
     message: `${pawn.name} delivered ${carried.amount} ${carried.kind}.`,
     data: { jobId: action.jobId, targetTileId: target.id }
@@ -505,8 +550,103 @@ function nearestResourceTile(state: LocalGameState, target: LocalTile, kind: Loc
     .sort((left, right) => localManhattan(left, target) - localManhattan(right, target) || left.id.localeCompare(right.id))[0];
 }
 
+function refreshStockpileHaulJobs(state: LocalGameState): void {
+  for (const source of Object.values(state.tiles).sort(compareLocalTiles)) {
+    if (!source.walkable || !source.resource || source.resource.amount <= 0 || isResourceInAcceptingStockpile(state, source)) {
+      continue;
+    }
+    if (reservationForTarget(state, source.id) || existingOpenHaulFromSource(state, source.id)) {
+      continue;
+    }
+    const target = nearestStockpileTileForResource(state, source, source.resource.kind);
+    if (!target) {
+      continue;
+    }
+    const job: LocalJob = {
+      id: nextLocalId(state, "job"),
+      kind: "haul",
+      purpose: "stockpile",
+      status: "open",
+      priority: 25,
+      targetTileId: target.id,
+      sourceTileId: source.id,
+      resource: source.resource.kind,
+      amount: source.resource.amount,
+      progress: 0,
+      workRequired: 1,
+      createdTick: state.tick,
+      createdByCommandId: target.stockpileZoneId ? state.stockpiles[target.stockpileZoneId]?.createdByCommandId : undefined
+    };
+    state.jobs[job.id] = job;
+    emitLocalEvent(state, {
+      kind: "haul.created",
+      subjectId: job.id,
+      message: `Created stockpile haul job for ${job.amount ?? 0} ${job.resource}.`,
+      data: { purpose: "stockpile", sourceTileId: source.id, targetTileId: target.id }
+    });
+  }
+}
+
+function existingOpenHaulFromSource(state: LocalGameState, sourceTileId: LocalId): boolean {
+  return Object.values(state.jobs).some((job) => job.kind === "haul" && job.sourceTileId === sourceTileId && job.status !== "done" && job.status !== "blocked");
+}
+
+function existingOpenHaulToTarget(state: LocalGameState, targetTileId: LocalId): boolean {
+  return Object.values(state.jobs).some((job) => job.kind === "haul" && job.targetTileId === targetTileId && job.status !== "done" && job.status !== "blocked");
+}
+
+function isResourceInAcceptingStockpile(state: LocalGameState, tile: LocalTile): boolean {
+  const zone = tile.stockpileZoneId ? state.stockpiles[tile.stockpileZoneId] : undefined;
+  return Boolean(tile.resource && zone?.accepts.includes(tile.resource.kind));
+}
+
+function nearestStockpileTileForResource(state: LocalGameState, source: LocalTile, kind: LocalResourceKind): LocalTile | undefined {
+  const candidates: { zoneId: LocalId; zonePriority: number; tile: LocalTile }[] = [];
+  for (const zone of Object.values(state.stockpiles)) {
+    if (!zone.accepts.includes(kind)) {
+      continue;
+    }
+    for (const tileId of zone.tileIds) {
+      const tile = state.tiles[tileId];
+      if (
+        !tile ||
+        tile.id === source.id ||
+        !tile.walkable ||
+        tile.blueprint ||
+        tile.building ||
+        (tile.resource && tile.resource.kind !== kind) ||
+        reservationForStockpileTarget(state, tile.id) ||
+        existingOpenHaulToTarget(state, tile.id)
+      ) {
+        continue;
+      }
+      candidates.push({ zoneId: zone.id, zonePriority: zone.priority, tile });
+    }
+  }
+  return candidates.sort(
+    (left, right) =>
+      right.zonePriority - left.zonePriority ||
+      localManhattan(left.tile, source) - localManhattan(right.tile, source) ||
+      left.tile.id.localeCompare(right.tile.id) ||
+      left.zoneId.localeCompare(right.zoneId)
+  )[0]?.tile;
+}
+
+function canAcceptStockpileDrop(state: LocalGameState, tileId: LocalId, kind: LocalResourceKind | undefined): boolean {
+  if (!kind) {
+    return false;
+  }
+  const tile = state.tiles[tileId];
+  const zone = tile?.stockpileZoneId ? state.stockpiles[tile.stockpileZoneId] : undefined;
+  return Boolean(tile && tile.walkable && !tile.blueprint && !tile.building && zone?.accepts.includes(kind) && (!tile.resource || tile.resource.kind === kind));
+}
+
 function reservationForTarget(state: LocalGameState, targetId: LocalId): boolean {
   return Object.values(state.reservations).some((reservation) => reservation.targetId === targetId);
+}
+
+function reservationForStockpileTarget(state: LocalGameState, tileId: LocalId): boolean {
+  return Object.values(state.reservations).some((reservation) => reservation.targetId === tileId || reservation.targetId.startsWith(`${tileId}:`));
 }
 
 function blueprintNeedsMaterials(required: readonly LocalResourceStack[], delivered: readonly LocalResourceStack[]): boolean {
@@ -524,4 +664,8 @@ function addDeliveredResource(delivered: LocalResourceStack[], stack: LocalResou
 
 function sortedPawns(state: LocalGameState): LocalPawn[] {
   return Object.values(state.pawns).sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function compareLocalTiles(left: LocalTile, right: LocalTile): number {
+  return left.y - right.y || left.x - right.x || left.id.localeCompare(right.id);
 }

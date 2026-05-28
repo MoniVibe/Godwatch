@@ -5,7 +5,19 @@ import { Rng } from "../src/sim/core/rng";
 import { deriveAlloyProfile, deriveMaterialItemAdjustments, ensureItemMaterialProfile, ensureItemPowerCell, ensurePersonResources } from "../src/sim/economy/power";
 import { computeAugmentationEffects, deriveInjuryBurden, installAugmentation, payAugmentationUpkeep, tickAugmentations } from "../src/sim/individuals/augmentations";
 import { attemptMindCompulsion, teachAbility, tickInfluenceState } from "../src/sim/individuals/influence";
-import { createLocalGameplayFixture, localTileId, submitLocalCommand, summarizeLocalGameState, tickLocalGame, validateLocalGameState } from "../src/sim/local";
+import {
+  checksumLocalGameState,
+  cloneLocalGameState,
+  createLocalGameSnapshot,
+  createLocalGameplayFixture,
+  localTileId,
+  replayLocalCommands,
+  submitLocalCommand,
+  summarizeLocalGameState,
+  tickLocalGame,
+  type LocalCommand,
+  validateLocalGameState
+} from "../src/sim/local";
 import { classifyRelationStance, deriveLoyaltyState, derivePersonEmotionalState } from "../src/sim/individuals/moods";
 import { summarizeBandEmotionalClimate } from "../src/sim/society/emotionalClimate";
 import { createWardFromConquest } from "../src/sim/society/family";
@@ -489,6 +501,146 @@ results.push(
     assert(first.stateSummary === repeat.stateSummary, "Expected deterministic local gameplay summary for repeated seed and commands.");
     assert(JSON.stringify(first.eventKinds) === JSON.stringify(repeat.eventKinds), "Expected deterministic local event ordering.");
     return first.stateSummary;
+  })
+);
+
+results.push(
+  scenario("local gameplay rejects invalid commands deterministically", () => {
+    function runFixture(): { stateSummary: string; eventKinds: string[] } {
+      const state = createLocalGameplayFixture("micro-local-invalid-command");
+      submitLocalCommand(state, {
+        id: "cmd-invalid-build",
+        playerId: "player-god",
+        issuedTick: state.tick,
+        applyAtTick: state.tick,
+        kind: "designate-build",
+        payload: {
+          tileId: "local:99:99",
+          buildingKind: "hut"
+        }
+      });
+      submitLocalCommand(state, {
+        id: "cmd-invalid-mine",
+        playerId: "player-god",
+        issuedTick: state.tick,
+        applyAtTick: state.tick,
+        kind: "designate-mine",
+        payload: {
+          tileId: localTileId(2, 2)
+        }
+      });
+
+      tickLocalGame(state, 1);
+      const issues = validateLocalGameState(state);
+      assert(issues.length === 0, `Expected invalid-command local gameplay state to validate:\n${issues.join("\n")}`);
+
+      const rejections = state.events.filter((eventEntry) => eventEntry.kind === "command.rejected");
+      assert(rejections.length === 2, `Expected two rejected commands, got ${rejections.length}.`);
+      assert(Object.values(state.jobs).length === 0, "Expected invalid commands not to create jobs.");
+      assert(Object.values(state.tiles).every((tile) => !tile.blueprint && !tile.building), "Expected invalid commands not to mutate buildings.");
+      assert(state.commandQueue.length === 0, "Expected invalid commands to leave the queue after rejection.");
+      return { stateSummary: summarizeLocalGameState(state), eventKinds: state.events.map((eventEntry) => eventEntry.kind) };
+    }
+
+    const first = runFixture();
+    const repeat = runFixture();
+    assert(first.stateSummary === repeat.stateSummary, "Expected deterministic invalid-command summary for repeated seed and commands.");
+    assert(JSON.stringify(first.eventKinds) === JSON.stringify(repeat.eventKinds), "Expected deterministic invalid-command event ordering.");
+    return first.stateSummary;
+  })
+);
+
+results.push(
+  scenario("local gameplay mining produces resources through pawn labor", () => {
+    function runFixture(): { stateSummary: string; eventKinds: string[] } {
+      const state = createLocalGameplayFixture("micro-local-mining");
+      const mineTileId = localTileId(9, 7);
+      submitLocalCommand(state, {
+        id: "cmd-mine-tree",
+        playerId: "player-god",
+        issuedTick: state.tick,
+        applyAtTick: state.tick,
+        kind: "designate-mine",
+        payload: {
+          tileId: mineTileId
+        }
+      });
+
+      tickLocalGame(state, 40);
+      const issues = validateLocalGameState(state);
+      assert(issues.length === 0, `Expected mining local gameplay state to validate:\n${issues.join("\n")}`);
+
+      const tile = state.tiles[mineTileId];
+      assert(tile?.kind === "grass", "Expected mined tree tile to become grass.");
+      assert(tile.resource?.kind === "wood" && tile.resource.amount === 2, `Expected mined tree to produce 2 wood, got ${tile.resource?.kind ?? "none"} ${tile.resource?.amount ?? 0}.`);
+      assert(Object.values(state.jobs).some((job) => job.kind === "mine" && job.status === "done"), "Expected completed mining job.");
+      assert(Object.values(state.reservations).length === 0, "Expected mining job to release reservations.");
+      const pawn = state.pawns["pawn-builder"];
+      assert(pawn?.xp.mining && pawn.xp.mining > 0, "Expected mining XP from pawn labor.");
+      const eventKinds = state.events.map((eventEntry) => eventEntry.kind);
+      assert(eventKinds.includes("mine.designated"), "Expected mining designation event.");
+      assert(eventKinds.includes("mine.complete"), "Expected mining completion event.");
+      return { stateSummary: summarizeLocalGameState(state), eventKinds };
+    }
+
+    const first = runFixture();
+    const repeat = runFixture();
+    assert(first.stateSummary === repeat.stateSummary, "Expected deterministic mining summary for repeated seed and commands.");
+    assert(JSON.stringify(first.eventKinds) === JSON.stringify(repeat.eventKinds), "Expected deterministic mining event ordering.");
+    return first.stateSummary;
+  })
+);
+
+results.push(
+  scenario("local gameplay stockpiles snapshot and replay deterministically", () => {
+    const initial = createLocalGameplayFixture("micro-local-stockpile-snapshot");
+    const commands: LocalCommand[] = [
+      {
+        id: "cmd-stockpile-wood",
+        playerId: "player-god",
+        issuedTick: initial.tick,
+        applyAtTick: initial.tick,
+        kind: "create-stockpile-zone",
+        payload: {
+          name: "Wood Yard",
+          rectangle: { x: 7, y: 2, width: 2, height: 2 },
+          accepts: ["wood"],
+          priority: 80
+        }
+      }
+    ];
+
+    const direct = cloneLocalGameState(initial);
+    for (const command of commands) {
+      submitLocalCommand(direct, command);
+    }
+    tickLocalGame(direct, 24);
+
+    const issues = validateLocalGameState(direct);
+    assert(issues.length === 0, `Expected stockpile local gameplay state to validate:\n${issues.join("\n")}`);
+
+    const sourceTile = direct.tiles[localTileId(4, 2)];
+    const stockpileTile = direct.tiles[localTileId(7, 2)];
+    assert(!sourceTile?.resource, "Expected loose wood source to be hauled away.");
+    assert(stockpileTile?.resource?.kind === "wood" && stockpileTile.resource.amount === 6, "Expected wood to be stored inside the stockpile zone.");
+    assert(Object.values(direct.jobs).some((job) => job.kind === "haul" && job.purpose === "stockpile" && job.status === "done"), "Expected completed stockpile haul job.");
+    assert(direct.events.some((eventEntry) => eventEntry.kind === "resource.stockpiled"), "Expected stockpile delivery event.");
+
+    const beforeSnapshot = JSON.stringify(direct);
+    const snapshot = createLocalGameSnapshot(direct, { recentEventLimit: 8 });
+    const afterSnapshot = JSON.stringify(direct);
+    assert(afterSnapshot === beforeSnapshot, "Expected local snapshot creation not to mutate local gameplay state.");
+    assert(snapshot.dimensions.width === direct.width && snapshot.dimensions.height === direct.height, "Expected snapshot dimensions to mirror local state.");
+    assert(snapshot.stockpiles.length === 1 && snapshot.stockpiles[0].stored.some((stack) => stack.kind === "wood" && stack.amount === 6), "Expected snapshot to summarize stockpile contents.");
+    const stockpileTileSnapshot = snapshot.tiles.find((tile) => tile.id === stockpileTile.id);
+    assert(stockpileTileSnapshot?.flags.zoneFlags.includes("stockpile"), "Expected stockpile tile snapshot zone flag.");
+    assert(stockpileTileSnapshot.flags.hasResource, "Expected stockpile tile snapshot resource flag.");
+    assert(stockpileTileSnapshot.contents.jobIds.length > 0, "Expected stockpile tile snapshot to list related job contents.");
+    assert(snapshot.recentEvents.some((eventEntry) => eventEntry.kind === "resource.stockpiled"), "Expected snapshot recent events to include stockpile delivery.");
+
+    const replay = replayLocalCommands(initial, commands, 24);
+    assert(checksumLocalGameState(direct) === replay.checksum, "Expected direct local run and replay checksum to match.");
+    return `stockpiles ${snapshot.stockpiles.length}; stored ${snapshot.stockpiles[0].stored.map((stack) => `${stack.amount} ${stack.kind}`).join(",")}; events ${snapshot.recentEvents.length}`;
   })
 );
 

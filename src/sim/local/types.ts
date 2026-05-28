@@ -16,6 +16,13 @@ export interface LocalResourceStack {
   amount: number;
 }
 
+export interface LocalStockpileRectangle {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface LocalBlueprint {
   id: LocalId;
   kind: LocalBuildingKind;
@@ -33,6 +40,15 @@ export interface LocalBuilding {
   completedTick: number;
 }
 
+export interface LocalStockpileZone {
+  id: LocalId;
+  name: string;
+  tileIds: LocalId[];
+  accepts: LocalResourceKind[];
+  priority: number;
+  createdByCommandId: LocalId;
+}
+
 export interface LocalTile {
   id: LocalId;
   x: number;
@@ -42,6 +58,7 @@ export interface LocalTile {
   resource?: LocalResourceStack;
   blueprint?: LocalBlueprint;
   building?: LocalBuilding;
+  stockpileZoneId?: LocalId;
 }
 
 export interface LocalSkills {
@@ -93,6 +110,7 @@ export type LocalJobKind = "haul" | "build" | "mine";
 export interface LocalJob {
   id: LocalId;
   kind: LocalJobKind;
+  purpose?: "build-material" | "stockpile" | "direct";
   status: "open" | "claimed" | "done" | "blocked";
   priority: number;
   targetTileId: LocalId;
@@ -147,6 +165,20 @@ export type LocalCommand =
         resource: LocalResourceKind;
         amount: number;
       };
+    }
+  | {
+      id: LocalId;
+      playerId: LocalId;
+      issuedTick: number;
+      applyAtTick: number;
+      kind: "create-stockpile-zone";
+      payload: {
+        name?: string;
+        tileIds?: LocalId[];
+        rectangle?: LocalStockpileRectangle;
+        accepts?: LocalResourceKind[];
+        priority?: number;
+      };
     };
 
 export interface LocalEvent {
@@ -168,6 +200,7 @@ export interface LocalGameState {
   pawns: Record<LocalId, LocalPawn>;
   jobs: Record<LocalId, LocalJob>;
   reservations: Record<LocalId, LocalReservation>;
+  stockpiles: Record<LocalId, LocalStockpileZone>;
   commandQueue: LocalCommand[];
   events: LocalEvent[];
 }
