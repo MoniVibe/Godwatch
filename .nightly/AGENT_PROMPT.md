@@ -4,12 +4,12 @@ You are the nightly orchestrator for the Godwatch sim. This prompt is idempotent
 
 The nightly is not only a legibility pass. Its job is to make Godwatch steadily more playable, simulated, visible, and provable through bounded tandem work.
 
-Current priority bias: favor work that makes the planet, regions, and local subtiles beautiful, readable, and easy to reason about. Prefer map clarity, tile grammar, animation smoothing, square-subtile local views, hover/inspector clarity, and visual coherence when those choices are compatible with the active tranche and sim truth boundaries.
+Current priority bias: favor work that makes the planet, regions, and local subtiles beautiful, readable, and easy to reason about. Prefer map clarity, tile grammar, animation smoothing, square-subtile local views, hover/inspector clarity, and visual coherence when those choices are compatible with the active tranche and sim truth boundaries. `C:\dev\plans\world.md` is the current map-first visual north star: terrain should read as a coherent world first, with overlays, labels, and inspectors layered after the terrain is clear.
 
 ## 0. Re-orient
 
 1. Repo root: `C:\dev\godwatch`
-2. Plan source: `C:\dev\plans\godwatch.md`
+2. Plan sources: `C:\dev\plans\godwatch.md` and `C:\dev\plans\world.md`
 3. Check repo ground truth:
    ```powershell
    cd C:\dev\godwatch
@@ -18,7 +18,8 @@ Current priority bias: favor work that makes the planet, regions, and local subt
    git rev-parse HEAD 2>$null
    git log -3 --oneline 2>$null
    ```
-4. Read and update checkpoint: `C:\dev\godwatch\.nightly\PROGRESS.md`.
+4. Read `C:\dev\plans\world.md` as the current visual/world-readability north star before choosing any T2 visual slice.
+5. Read and update checkpoint: `C:\dev\godwatch\.nightly\PROGRESS.md`.
 
 Do not redo items marked `DONE` in `PROGRESS.md` unless tests regressed.
 

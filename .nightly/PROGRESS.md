@@ -1,6 +1,6 @@
 # Godwatch Functional Tandem Nightly Progress
 
-Plan source: `C:\dev\plans\godwatch.md`
+Plan sources: `C:\dev\plans\godwatch.md`, `C:\dev\plans\world.md`
 Repo: `C:\dev\godwatch`
 
 ## Tranche Status
@@ -14,6 +14,17 @@ Repo: `C:\dev\godwatch`
 | T5 God command bus + first economy pressure | TODO | Blocked until T4 acceptance is complete. |
 
 ## Runs
+
+## Run 2026-05-28T00:31:10Z
+- Branch / HEAD: nightly/godwatch-legibility / 77b02d7
+- Tranche / slice: Nightly prompt now includes `C:\dev\plans\world.md` as the map-first visual north star
+- Status: DONE
+- Tests: npm run check -> PASS
+- Commit: recorded in this commit; pushed: yes (`origin/nightly/godwatch-legibility`)
+- Lanes: systems=none, visual=prompt, micro=none
+- Files touched: `.nightly/AGENT_PROMPT.md`, `.nightly/PROGRESS.md`; automation `godwatch-legibility-nightly` updated in app
+- Next run: Use `world.md` to prioritize dense planet terrain, quiet tile seams, clear overlays, and inspector-first map readability.
+- Blockers: none.
 
 ## Run 2026-05-28T00:17:57Z
 - Branch / HEAD: nightly/godwatch-legibility / af32f7a
