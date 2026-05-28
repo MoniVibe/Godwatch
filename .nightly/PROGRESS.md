@@ -20,7 +20,7 @@ Repo: `C:\dev\godwatch`
 - Tranche / slice: T2 world band visual easing and quieter route context
 - Status: DONE
 - Tests: npm run check -> PASS; browser check at http://127.0.0.1:5173 -> PASS
-- Commit: recorded in this commit; pushed: pending
+- Commit: 92937be pushed: yes (`origin/nightly/godwatch-legibility`)
 - Lanes: systems=none, visual=done, micro=check+browser
 - Files touched: `.nightly/PROGRESS.md`, `src/main.ts`
 - Next run: Add explicit world marker semantics/legend and hover copy for bands, settlements, route danger, claims, weather, crises, and lingering effects.
