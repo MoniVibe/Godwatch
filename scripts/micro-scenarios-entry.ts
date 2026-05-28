@@ -22,6 +22,7 @@ import {
 import { ensureLocalMapForSettlement, validLocalTileIdForMap } from "../src/sim/world/localMap";
 import { collectOccupancySnapshot } from "../src/sim/world/occupancy";
 import { createRenderSnapshot, snapshotDebugSummary } from "../src/view/snapshot";
+import { REQUIRED_MAP_MARKER_SEMANTIC_IDS, mapMarkerLegendEntries, mapMarkerLegendEntry, type MapMarkerSemanticId } from "../src/view/mapSemantics";
 import type {
   AssetKind,
   Band,
@@ -524,6 +525,59 @@ results.push(
     assertValid(world, "world render snapshot stability scenario");
 
     return `world snapshot sectors ${snapshot.sectors.length}; tiles ${snapshot.tiles.length}; routes ${snapshot.routes.length}`;
+  })
+);
+
+results.push(
+  scenario("map marker semantics are stable and clarify route context", () => {
+    const entries = mapMarkerLegendEntries();
+    const ids = entries.map((entry) => entry.id);
+    const expectedIds: MapMarkerSemanticId[] = [
+      "settlement",
+      "watched-band",
+      "selected-active-route",
+      "route-context-danger",
+      "site-resource",
+      "threat-crisis",
+      "territory-claim",
+      "weather-front",
+      "settlement-border",
+      "local-building",
+      "lingering-effect"
+    ];
+    const required = new Set<MapMarkerSemanticId>([
+      "settlement",
+      "watched-band",
+      "selected-active-route",
+      "route-context-danger",
+      "site-resource",
+      "threat-crisis",
+      "territory-claim",
+      "weather-front",
+      "settlement-border",
+      "local-building",
+      "lingering-effect"
+    ]);
+
+    assert(JSON.stringify(ids) === JSON.stringify(expectedIds), `Expected stable map marker order ${expectedIds.join(", ")}, got ${ids.join(", ")}.`);
+    assert(JSON.stringify(REQUIRED_MAP_MARKER_SEMANTIC_IDS) === JSON.stringify(expectedIds), "Expected exported required marker IDs to match legend order.");
+    for (const id of required) {
+      const entry = mapMarkerLegendEntry(id);
+      assert(ids.includes(id), `Expected map marker semantics to include ${id}.`);
+      assert(entry.id === id, `Expected marker lookup for ${id}.`);
+      assert(entry.label.length > 0 && entry.description.length > 20, `Expected ${id} to expose UI-ready label and description.`);
+    }
+
+    const watchedBand = mapMarkerLegendEntry("watched-band");
+    const routeContext = mapMarkerLegendEntry("route-context-danger");
+    const selectedRoute = mapMarkerLegendEntry("selected-active-route");
+    assert(watchedBand.visualKind === "diamond", "Expected watched bands to use diamond marker semantics.");
+    assert(watchedBand.description.toLowerCase().includes("diamond"), "Expected watched band copy to mention diamond markers.");
+    assert(routeContext.visualKind === "line", "Expected route danger to be line semantics.");
+    assert(routeContext.description.includes("not necessarily active movement"), "Expected route danger copy to avoid implying active movement.");
+    assert(selectedRoute.description.includes("not imply movement"), "Expected selected route copy to require band travel state before implying movement.");
+
+    return `${entries.length} marker semantics; band ${watchedBand.visualKind}; route danger ${routeContext.visualKind}`;
   })
 );
 

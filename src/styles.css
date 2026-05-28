@@ -947,32 +947,52 @@ small {
 
 .map-legend {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
   gap: 6px;
   margin-top: 10px;
 }
 
 .map-legend span {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   align-items: center;
   min-width: 0;
-  gap: 6px;
+  column-gap: 7px;
+  row-gap: 1px;
   padding: 6px 7px;
   border: 1px solid rgba(241, 234, 219, 0.1);
   border-radius: 7px;
   background: rgba(13, 16, 14, 0.28);
   color: #c7ccb9;
-  font-size: 0.72rem;
+  overflow: hidden;
+}
+
+.map-legend i {
+  grid-row: 1 / span 2;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  background: #d7d9cd;
+}
+
+.map-legend b,
+.map-legend small {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.map-legend i {
-  flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
-  background: #d7d9cd;
+.map-legend b {
+  color: #f4ead8;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.map-legend small {
+  color: #9ea996;
+  font-size: 0.63rem;
 }
 
 .map-legend .legend-settlement {
@@ -984,7 +1004,15 @@ small {
   width: 18px;
   height: 3px;
   border-radius: 999px;
-  background: #d8c99e;
+  background: linear-gradient(90deg, #c64737, #e6bb5b);
+}
+
+.map-legend .legend-selected-route {
+  width: 19px;
+  height: 4px;
+  border-radius: 999px;
+  background: #f3e1a1;
+  box-shadow: 0 0 0 2px rgba(13, 16, 14, 0.72);
 }
 
 .map-legend .legend-feature {
@@ -1007,20 +1035,28 @@ small {
 }
 
 .map-legend .legend-threat {
-  border: 2px solid #c64737;
-  border-radius: 50%;
+  width: 0;
+  height: 0;
+  border-right: 7px solid transparent;
+  border-bottom: 13px solid #c64737;
+  border-left: 7px solid transparent;
+  border-radius: 0;
   background: transparent;
 }
 
 .map-legend .legend-territory {
-  border: 2px solid #e6bb5b;
+  width: 20px;
+  height: 12px;
+  border: 2px solid rgba(230, 187, 91, 0.8);
   border-radius: 4px;
   background: rgba(230, 187, 91, 0.18);
 }
 
 .map-legend .legend-weather {
-  border-radius: 50%;
-  background: rgba(93, 139, 145, 0.7);
+  width: 20px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(93, 139, 145, 0.72);
 }
 
 .map-legend .legend-border {
@@ -1048,6 +1084,17 @@ small {
   border: 2px solid #e6bb5b;
   border-radius: 3px;
   background: rgba(230, 187, 91, 0.14);
+}
+
+.map-legend .legend-danger-fill {
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(198, 71, 55, 0.9), rgba(198, 166, 77, 0.55));
+}
+
+.map-legend .legend-effect {
+  border: 2px dashed rgba(230, 187, 91, 0.72);
+  border-radius: 50%;
+  background: rgba(230, 187, 91, 0.16);
 }
 
 .settlement-panel {

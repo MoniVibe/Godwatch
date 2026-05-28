@@ -47,6 +47,7 @@ import type {
   World
 } from "./types";
 import { createRenderSnapshot, type RenderSnapshot } from "./view/snapshot";
+import { mapMarkerLegendEntries, type MapMarkerLegendEntry, type MapMarkerSemanticId } from "./view/mapSemantics";
 
 const storageKey = "godwatch.save.v1";
 type ActivityScope = "person" | "band" | "village" | "empire";
@@ -1484,14 +1485,7 @@ function renderMediumSummary(): string {
   const activeAgreementCount = agreements.filter((agreement) => agreement.status === "active" || agreement.status === "strained").length;
   const renderRegionLabel = (regionName: string, biomeName: string): string =>
     regionName === biomeName ? biomeName : `${regionName} · ${biomeName}`;
-  const overlayLegend =
-    atlasOverlay === "elevation"
-      ? { icon: "legend-elevation", label: "elevation fill" }
-      : atlasOverlay === "threat"
-        ? { icon: "legend-threat", label: "danger fill" }
-        : atlasOverlay === "political"
-          ? { icon: "legend-political", label: "society fill" }
-          : { icon: "legend-biome", label: "biome fill" };
+  const legendEntries = visibleMapLegendEntries(Boolean(route));
   return `
     <div class="medium-summary">
       ${statusPill("Medium", world.planet.name)}
@@ -1513,16 +1507,17 @@ function renderMediumSummary(): string {
       ${statusPill("Current route", route && routeBiome ? `${routeBiome.name} · ${route.topography} · pass ${route.passDifficulty}` : "settled")}
     </div>
     <div class="map-legend">
-      <span><i class="${overlayLegend.icon}"></i>${overlayLegend.label}</span>
-      <span><i class="legend-settlement"></i>settlement</span>
-      <span><i class="legend-route"></i>priority route</span>
-      <span><i class="legend-feature"></i>site/resource</span>
-      <span><i class="legend-band"></i>watched band</span>
-      <span><i class="legend-threat"></i>threat</span>
-      <span><i class="legend-territory"></i>territory claim</span>
-      <span><i class="legend-weather"></i>weather front</span>
-      <span><i class="legend-border"></i>settlement border</span>
-      <span><i class="legend-building"></i>local building</span>
+      ${legendEntries
+        .map(
+          (entry) => `
+            <span title="${escapeHtml(`${entry.label}: ${entry.detail}`)}">
+              <i class="${entry.icon}"></i>
+              <b>${escapeHtml(entry.label)}</b>
+              <small>${escapeHtml(entry.detail)}</small>
+            </span>
+          `
+        )
+        .join("")}
     </div>
     <div class="region-strip">
       ${Object.values(world.planet.regions)
@@ -1552,6 +1547,73 @@ function renderMediumSummary(): string {
         .join("")}
     </div>
   `;
+}
+
+interface VisibleMapLegendEntry {
+  icon: string;
+  label: string;
+  detail: string;
+}
+
+function overlayLegendEntry(): VisibleMapLegendEntry {
+  if (atlasOverlay === "elevation") {
+    return { icon: "legend-elevation", label: "Elevation fill", detail: "height shade" };
+  }
+  if (atlasOverlay === "threat") {
+    return { icon: "legend-danger-fill", label: "Danger fill", detail: "regional risk" };
+  }
+  if (atlasOverlay === "political") {
+    return { icon: "legend-political", label: "Society fill", detail: "dominant claim" };
+  }
+  return { icon: "legend-biome", label: "Biome fill", detail: "terrain climate" };
+}
+
+function legendIconForSemantic(id: MapMarkerSemanticId): string {
+  if (id === "settlement") return "legend-settlement";
+  if (id === "watched-band") return "legend-band";
+  if (id === "selected-active-route") return "legend-selected-route";
+  if (id === "route-context-danger") return "legend-route";
+  if (id === "site-resource") return "legend-feature";
+  if (id === "threat-crisis") return "legend-threat";
+  if (id === "territory-claim") return "legend-territory";
+  if (id === "weather-front") return "legend-weather";
+  if (id === "settlement-border") return "legend-border";
+  if (id === "local-building") return "legend-building";
+  return "legend-effect";
+}
+
+function shortLegendDetail(entry: MapMarkerLegendEntry): string {
+  if (entry.id === "settlement") return "village or city";
+  if (entry.id === "watched-band") return "diamond group marker";
+  if (entry.id === "selected-active-route") return "selected travel path";
+  if (entry.id === "route-context-danger") return "red danger, gold hard pass";
+  if (entry.id === "site-resource") return "discoverable place";
+  if (entry.id === "threat-crisis") return "boss or crisis";
+  if (entry.id === "territory-claim") return "society claim area";
+  if (entry.id === "weather-front") return "front or storm area";
+  if (entry.id === "settlement-border") return "wall or boundary";
+  if (entry.id === "local-building") return "occupied footprint";
+  return "projectile or status zone";
+}
+
+function visibleMapLegendEntries(hasSelectedRoute: boolean): VisibleMapLegendEntry[] {
+  const semanticEntries = mapMarkerLegendEntries().filter((entry) => {
+    if (entry.id === "selected-active-route") {
+      return hasSelectedRoute;
+    }
+    if (atlasZoom === "local") {
+      return ["settlement", "watched-band", "settlement-border", "local-building", "lingering-effect"].includes(entry.id);
+    }
+    return entry.layer !== "local";
+  });
+  return [
+    overlayLegendEntry(),
+    ...semanticEntries.map((entry) => ({
+      icon: legendIconForSemantic(entry.id),
+      label: entry.label,
+      detail: shortLegendDetail(entry)
+    }))
+  ];
 }
 
 function renderAtlasPanel(): string {
@@ -4152,7 +4214,7 @@ function renderSettlementHover(settlement: Settlement): string {
   const activeQuestCount = Object.values(world.quests).filter((quest) => quest.locationId === settlement.id && (quest.status === "open" || quest.status === "active")).length;
   return `
     <strong>${escapeHtml(settlement.name)}</strong>
-    <small>${escapeHtml(`${faction?.name ?? "unclaimed"} · ${biome?.name ?? settlement.terrain}`)}</small>
+    <small>${escapeHtml(`Settlement dot · ${faction?.name ?? "unclaimed"} · ${biome?.name ?? settlement.terrain}`)}</small>
     <small>${escapeHtml(`${settlement.topography} · ${Math.round(settlement.elevationMeters)}m · pop ${settlement.population}`)}</small>
     <small>${escapeHtml(`threat ${Math.round(settlement.threat)} · buildings ${(settlement.buildings ?? []).length} · quests ${activeQuestCount}`)}</small>
   `;
@@ -4163,7 +4225,7 @@ function renderBandHover(band: Band): string {
   const quest = band.currentQuestId ? world.quests[band.currentQuestId] : undefined;
   return `
     <strong>${escapeHtml(band.name)}</strong>
-    <small>${escapeHtml(`${band.purpose} · led by ${leader ? formatPersonName(leader) : "unknown"}`)}</small>
+    <small>${escapeHtml(`Band diamond · ${band.purpose} · led by ${leader ? formatPersonName(leader) : "unknown"}`)}</small>
     <small>${escapeHtml(band.goal)}</small>
     <small>${escapeHtml(`cohesion ${Math.round(band.cohesion)} · supplies ${Math.round(band.supplies)}${quest ? ` · ${quest.summary}` : ""}`)}</small>
   `;
