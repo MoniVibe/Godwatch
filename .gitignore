@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .micro-scenarios/
+.local-stress/
 .codex/
 animation-captures/
 vite.*.log

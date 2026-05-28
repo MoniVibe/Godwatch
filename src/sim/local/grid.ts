@@ -47,6 +47,11 @@ export function nextLocalStepToward(state: Pick<LocalGameState, "width" | "heigh
     return from;
   }
 
+  const directStep = firstWalkableDirectStep(state, from, to);
+  if (directStep) {
+    return directStep;
+  }
+
   const startKey = localTileId(from.x, from.y);
   const targetKey = localTileId(to.x, to.y);
   const queue: LocalCoord[] = [from];
@@ -74,4 +79,25 @@ export function nextLocalStepToward(state: Pick<LocalGameState, "width" | "heigh
   }
 
   return undefined;
+}
+
+function firstWalkableDirectStep(state: Pick<LocalGameState, "width" | "height" | "tiles">, from: LocalCoord, to: LocalCoord): LocalCoord | undefined {
+  const xDirection = Math.sign(to.x - from.x);
+  const yDirection = Math.sign(to.y - from.y);
+  const candidates: LocalCoord[] = [];
+  if (Math.abs(to.x - from.x) >= Math.abs(to.y - from.y) && xDirection !== 0) {
+    candidates.push({ x: from.x + xDirection, y: from.y });
+  }
+  if (yDirection !== 0) {
+    candidates.push({ x: from.x, y: from.y + yDirection });
+  }
+  if (xDirection !== 0 && !candidates.some((candidate) => candidate.x === from.x + xDirection && candidate.y === from.y)) {
+    candidates.push({ x: from.x + xDirection, y: from.y });
+  }
+
+  const currentDistance = localManhattan(from, to);
+  return candidates.find((candidate) => {
+    const tile = getLocalTile(state, candidate);
+    return tile && isInLocalBounds(state, candidate) && tile.walkable && localManhattan(candidate, to) < currentDistance;
+  });
 }

@@ -10,6 +10,7 @@
     "test": "npm run test:smoke && npm run test:scenarios",
     "test:smoke": "node scripts/run-sim-smoke.mjs",
     "test:scenarios": "node scripts/run-micro-scenarios.mjs",
+    "stress:local": "node scripts/run-local-stress.mjs",
     "check": "npm run build && npm test"
   },
   "devDependencies": {

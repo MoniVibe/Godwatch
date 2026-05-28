@@ -8,6 +8,7 @@ import { attemptMindCompulsion, teachAbility, tickInfluenceState } from "../src/
 import {
   checksumLocalGameState,
   cloneLocalGameState,
+  createLocalGameState,
   createLocalGameSnapshot,
   createLocalGameplayFixture,
   localTileId,
@@ -16,6 +17,7 @@ import {
   summarizeLocalGameState,
   tickLocalGame,
   type LocalCommand,
+  type LocalJob,
   validateLocalGameState
 } from "../src/sim/local";
 import { classifyRelationStance, deriveLoyaltyState, derivePersonEmotionalState } from "../src/sim/individuals/moods";
@@ -592,6 +594,64 @@ results.push(
 );
 
 results.push(
+  scenario("local gameplay claims numbered jobs in natural order", () => {
+    const state = createLocalGameState({ seed: "micro-local-natural-job-order", width: 64, height: 8 });
+    const stockpileTileIds: string[] = [];
+    state.stockpiles["stockpile-natural"] = {
+      id: "stockpile-natural",
+      name: "Natural Order Stockpile",
+      tileIds: stockpileTileIds,
+      accepts: ["wood"],
+      priority: 50,
+      createdByCommandId: "scenario"
+    };
+
+    for (let index = 0; index < 12; index += 1) {
+      const sourceTileId = localTileId(2 + index * 4, 2);
+      const targetTileId = localTileId(3 + index * 4, 2);
+      const sourceTile = state.tiles[sourceTileId];
+      const targetTile = state.tiles[targetTileId];
+      sourceTile.resource = { kind: "wood", amount: 1 };
+      targetTile.stockpileZoneId = "stockpile-natural";
+      stockpileTileIds.push(targetTileId);
+      const pawnId = `pawn-${index.toString().padStart(3, "0")}`;
+      state.pawns[pawnId] = {
+        id: pawnId,
+        name: `Pawn ${index}`,
+        x: sourceTile.x,
+        y: sourceTile.y,
+        skills: { hauling: 2, construction: 0, mining: 0 },
+        xp: { hauling: 0, construction: 0, mining: 0 }
+      };
+      const job: LocalJob = {
+        id: `job-${index}`,
+        kind: "haul",
+        purpose: "stockpile",
+        status: "open",
+        priority: 25,
+        targetTileId,
+        sourceTileId,
+        resource: "wood",
+        amount: 1,
+        progress: 0,
+        workRequired: 1,
+        createdTick: 0,
+        createdByCommandId: "scenario"
+      };
+      state.jobs[job.id] = job;
+    }
+
+    tickLocalGame(state, 3);
+    const issues = validateLocalGameState(state);
+    assert(issues.length === 0, `Expected natural-order hauling state to validate:\n${issues.join("\n")}`);
+    const delivered = stockpileTileIds.reduce((sum, tileId) => sum + (state.tiles[tileId].resource?.amount ?? 0), 0);
+    assert(delivered === 12, `Expected all naturally ordered jobs to deliver adjacent wood, got ${delivered}.`);
+    assert(Object.values(state.jobs).every((job) => job.status === "done"), "Expected every naturally ordered haul job to complete.");
+    return `delivered ${delivered}; events ${state.events.length}`;
+  })
+);
+
+results.push(
   scenario("local gameplay stockpiles snapshot and replay deterministically", () => {
     const initial = createLocalGameplayFixture("micro-local-stockpile-snapshot");
     const commands: LocalCommand[] = [
@@ -641,6 +701,105 @@ results.push(
     const replay = replayLocalCommands(initial, commands, 24);
     assert(checksumLocalGameState(direct) === replay.checksum, "Expected direct local run and replay checksum to match.");
     return `stockpiles ${snapshot.stockpiles.length}; stored ${snapshot.stockpiles[0].stored.map((stack) => `${stack.amount} ${stack.kind}`).join(",")}; events ${snapshot.recentEvents.length}`;
+  })
+);
+
+results.push(
+  scenario("local gameplay indexes many stockpile jobs deterministically", () => {
+    const count = 500;
+    const sourceColumns = 50;
+
+    function runFixture(): { detail: string; checksum: string } {
+      const state = createLocalGameState({
+        seed: "micro-local-indexed-stockpile",
+        width: sourceColumns * 2 + 8,
+        height: Math.ceil(count / sourceColumns) + 6
+      });
+      for (let index = 0; index < count; index += 1) {
+        const row = Math.floor(index / sourceColumns);
+        const column = index % sourceColumns;
+        const x = 2 + column;
+        const y = 2 + row;
+        const pawnId = `pawn-${index.toString().padStart(4, "0")}`;
+        state.pawns[pawnId] = {
+          id: pawnId,
+          name: `Hauler ${index}`,
+          x,
+          y,
+          skills: { hauling: 1, construction: 1, mining: 1 },
+          xp: { hauling: 0, construction: 0, mining: 0 }
+        };
+        state.tiles[localTileId(x, y)].resource = { kind: "wood", amount: 1 };
+      }
+      submitLocalCommand(state, {
+        id: "cmd-index-stockpile",
+        playerId: "player-god",
+        issuedTick: 0,
+        applyAtTick: 0,
+        kind: "create-stockpile-zone",
+        payload: {
+          rectangle: { x: sourceColumns + 4, y: 2, width: sourceColumns, height: Math.ceil(count / sourceColumns) + 1 },
+          accepts: ["wood"],
+          priority: 100
+        }
+      });
+
+      tickLocalGame(state, 1);
+      const issues = validateLocalGameState(state);
+      assert(issues.length === 0, `Expected indexed stockpile stress state to validate:\n${issues.join("\n")}`);
+      const jobs = Object.values(state.jobs);
+      const claimed = jobs.filter((job) => job.status === "claimed").length;
+      const carrying = Object.values(state.pawns).filter((pawn) => pawn.inventory?.kind === "wood").length;
+      assert(jobs.length === count, `Expected ${count} stockpile haul jobs, got ${jobs.length}.`);
+      assert(claimed === count, `Expected ${count} claimed jobs, got ${claimed}.`);
+      assert(carrying === count, `Expected ${count} pawns carrying wood, got ${carrying}.`);
+      return {
+        detail: `indexed ${jobs.length} stockpile jobs; claimed ${claimed}; carrying ${carrying}; events ${state.events.length}`,
+        checksum: checksumLocalGameState(state)
+      };
+    }
+
+    const first = runFixture();
+    const repeat = runFixture();
+    assert(first.checksum === repeat.checksum, "Expected indexed stockpile assignment to remain deterministic.");
+    return first.detail;
+  })
+);
+
+results.push(
+  scenario("local gameplay build material hauling outranks stockpile hauling", () => {
+    const state = createLocalGameplayFixture("micro-local-build-priority");
+    submitLocalCommand(state, {
+      id: "cmd-build-priority-a",
+      playerId: "player-god",
+      issuedTick: 0,
+      applyAtTick: 0,
+      kind: "create-stockpile-zone",
+      payload: {
+        rectangle: { x: 7, y: 2, width: 2, height: 2 },
+        accepts: ["wood"],
+        priority: 100
+      }
+    });
+    submitLocalCommand(state, {
+      id: "cmd-build-priority-b",
+      playerId: "player-god",
+      issuedTick: 0,
+      applyAtTick: 0,
+      kind: "designate-build",
+      payload: {
+        tileId: localTileId(7, 6),
+        buildingKind: "hut"
+      }
+    });
+
+    tickLocalGame(state, 1);
+    const issues = validateLocalGameState(state);
+    assert(issues.length === 0, `Expected build-priority local gameplay state to validate:\n${issues.join("\n")}`);
+    const hauls = Object.values(state.jobs).filter((job) => job.kind === "haul");
+    assert(hauls.some((job) => job.purpose === "build-material" && job.status === "claimed"), "Expected build-material haul to claim the loose wood first.");
+    assert(!hauls.some((job) => job.purpose === "stockpile" && job.sourceTileId === localTileId(4, 2)), "Expected stockpile hauling not to preempt the build-material source.");
+    return summarizeLocalGameState(state);
   })
 );
 
