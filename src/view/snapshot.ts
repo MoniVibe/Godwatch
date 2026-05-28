@@ -1,5 +1,6 @@
 import { collectOccupancySnapshot, type EntityPositionSnapshot, type OccupancyBucket, type WorldOccupancySnapshot } from "../sim/world/occupancy";
 import { deriveWorldClock, type WorldClockSnapshot } from "../sim/world/calendar";
+import { createPlanetHexGrid, type PlanetHexTile } from "../sim/environment/planetHexGrid";
 import type {
   Id,
   LingeringEffect,
@@ -74,6 +75,7 @@ export interface RenderSnapshot {
   settlements: Settlement[];
   sectors: WorldSector[];
   tiles: OverworldTile[];
+  planetHexes: readonly PlanetHexTile[];
   routes: TravelRoute[];
   entities: EntityPositionSnapshot[];
   occupancyBuckets: OccupancyBucket[];
@@ -169,6 +171,7 @@ export function createRenderSnapshot(world: World, options: RenderSnapshotOption
   const selectedPersonId = selectedPersonIdFor(world, options);
   const sectors = mode === "world" ? allWorldSectors(world) : regionSectorsFor(world, selectedSettlement, options.regionRadius ?? 2);
   const tiles = mode === "world" ? allWorldTiles(world) : tilesForSectors(world, sectors);
+  const planetHexes = mode === "world" ? createPlanetHexGrid(world).tiles : [];
   const occupancy = collectOccupancySnapshot(world, { includeEffects: options.includeEffects ?? true });
 
   return {
@@ -185,6 +188,7 @@ export function createRenderSnapshot(world: World, options: RenderSnapshotOption
     settlements: Object.values(world.settlements).sort((left, right) => left.id.localeCompare(right.id)),
     sectors,
     tiles,
+    planetHexes,
     routes: routesForSettlement(world, mode === "world" ? undefined : selectedSettlement),
     entities: occupancy.entries,
     occupancyBuckets: occupancy.buckets,
@@ -206,6 +210,7 @@ export function snapshotDebugSummary(snapshot: RenderSnapshot): Record<string, n
     settlements: snapshot.settlements.length,
     sectors: snapshot.sectors.length,
     tiles: snapshot.tiles.length,
+    planetHexes: snapshot.planetHexes.length,
     routes: snapshot.routes.length,
     entities: snapshot.entities.length,
     occupancyBuckets: snapshot.occupancyBuckets.length,

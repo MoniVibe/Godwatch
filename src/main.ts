@@ -1835,6 +1835,29 @@ interface TileProjection {
   radius: number;
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+interface PlanetHexCoord {
+  q: number;
+  r: number;
+}
+
+interface ProjectedPlanetHex {
+  packet: UnknownRecord;
+  x: number;
+  y: number;
+  radius: number;
+}
+
+interface PlanetHexLayout {
+  centerX: number;
+  centerY: number;
+  rawCenterX: number;
+  rawCenterY: number;
+  radius: number;
+  globeRadius: number;
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -1973,6 +1996,161 @@ function worldHexLayout(sectors: readonly World["geography"]["sectors"][string][
     radius: clampNumber(fittedRadius, 20, 72),
     globeRadius
   };
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null;
+}
+
+function recordNumber(record: UnknownRecord | undefined, key: string): number | undefined {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function recordString(record: UnknownRecord | undefined, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function planetHexTerrainRecord(packet: UnknownRecord): UnknownRecord | undefined {
+  return isRecord(packet.terrain) ? packet.terrain : undefined;
+}
+
+function planetHexString(packet: UnknownRecord, keys: readonly string[]): string | undefined {
+  const terrain = planetHexTerrainRecord(packet);
+  for (const key of keys) {
+    const terrainValue = recordString(terrain, key);
+    if (terrainValue) {
+      return terrainValue;
+    }
+    const packetValue = recordString(packet, key);
+    if (packetValue) {
+      return packetValue;
+    }
+  }
+  return keys.includes("terrain") && typeof packet.terrain === "string" ? packet.terrain : undefined;
+}
+
+function planetHexNumber(packet: UnknownRecord, keys: readonly string[]): number | undefined {
+  const terrain = planetHexTerrainRecord(packet);
+  for (const key of keys) {
+    const terrainValue = recordNumber(terrain, key);
+    if (terrainValue !== undefined) {
+      return terrainValue;
+    }
+    const packetValue = recordNumber(packet, key);
+    if (packetValue !== undefined) {
+      return packetValue;
+    }
+  }
+  return undefined;
+}
+
+function planetHexCoord(packet: UnknownRecord): PlanetHexCoord | undefined {
+  const coord = isRecord(packet.coord) ? packet.coord : undefined;
+  const q = recordNumber(coord, "q") ?? recordNumber(packet, "q");
+  const r = recordNumber(coord, "r") ?? recordNumber(packet, "r");
+  return q !== undefined && r !== undefined ? { q, r } : undefined;
+}
+
+function planetHexCenter(packet: UnknownRecord): CanvasPoint | undefined {
+  const center = isRecord(packet.center) ? packet.center : undefined;
+  const x = recordNumber(center, "x") ?? recordNumber(packet, "x");
+  const y = recordNumber(center, "y") ?? recordNumber(packet, "y");
+  return x !== undefined && y !== undefined ? { x, y } : undefined;
+}
+
+function isPlanetHexPacket(value: unknown): value is UnknownRecord {
+  return isRecord(value) && Boolean(planetHexCoord(value) || planetHexCenter(value));
+}
+
+function planetHexPackets(snapshot: RenderSnapshot): UnknownRecord[] {
+  const candidate: unknown = (snapshot as { planetHexes?: unknown }).planetHexes;
+  return Array.isArray(candidate) ? (candidate as unknown[]).filter(isPlanetHexPacket) : [];
+}
+
+function planetHexLayoutFromCoords(packets: readonly UnknownRecord[], width: number, height: number): PlanetHexLayout | undefined {
+  const coords = packets.map(planetHexCoord).filter((coord): coord is PlanetHexCoord => Boolean(coord));
+  if (coords.length === 0) {
+    return undefined;
+  }
+  const globeRadius = planetRadius(width, height);
+  const centerX = width * 0.5;
+  const centerY = height * 0.51;
+  const points = coords.map((coord) => worldHexRawPoint(coord.q, coord.r));
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y));
+  const rawWidth = Math.max(1, maxX - minX + Math.sqrt(3));
+  const rawHeight = Math.max(1, maxY - minY + 2);
+  const fittedRadius = Math.min((globeRadius * 1.96) / rawWidth, (globeRadius * 1.96) / rawHeight);
+  return {
+    centerX,
+    centerY,
+    rawCenterX: (minX + maxX) / 2,
+    rawCenterY: (minY + maxY) / 2,
+    radius: clampNumber(fittedRadius, 2.2, 18),
+    globeRadius
+  };
+}
+
+function inferPlanetHexRadiusFromCount(count: number, width: number, height: number): number {
+  const globeRadius = planetRadius(width, height);
+  const cellArea = (Math.PI * globeRadius * globeRadius * 0.94) / Math.max(1, count);
+  return clampNumber(Math.sqrt(cellArea / ((3 * Math.sqrt(3)) / 2)), 2.2, 18);
+}
+
+function projectPlanetHexCenter(center: CanvasPoint, width: number, height: number): CanvasPoint {
+  const globeRadius = planetRadius(width, height);
+  const centerX = width * 0.5;
+  const centerY = height * 0.51;
+  const looksNormalized = center.x >= 0 && center.x <= 1 && center.y >= 0 && center.y <= 1;
+  return looksNormalized
+    ? {
+        x: centerX + (center.x - 0.5) * globeRadius * 1.94,
+        y: centerY + (center.y - 0.5) * globeRadius * 1.94
+      }
+    : {
+        x: centerX + center.x * globeRadius,
+        y: centerY + center.y * globeRadius
+      };
+}
+
+function projectedPlanetHexes(snapshot: RenderSnapshot, width: number, height: number): ProjectedPlanetHex[] {
+  const packets = planetHexPackets(snapshot);
+  if (packets.length === 0) {
+    return [];
+  }
+  const coordCount = packets.filter((packet) => Boolean(planetHexCoord(packet))).length;
+  const layout = coordCount >= Math.max(1, Math.floor(packets.length * 0.75)) ? planetHexLayoutFromCoords(packets, width, height) : undefined;
+  const centerRadius = inferPlanetHexRadiusFromCount(packets.length, width, height);
+  return packets
+    .map((packet) => {
+      const coord = planetHexCoord(packet);
+      if (coord && layout) {
+        const raw = worldHexRawPoint(coord.q, coord.r);
+        return {
+          packet,
+          x: layout.centerX + (raw.x - layout.rawCenterX) * layout.radius,
+          y: layout.centerY + (raw.y - layout.rawCenterY) * layout.radius,
+          radius: layout.radius
+        };
+      }
+      const center = planetHexCenter(packet);
+      if (!center) {
+        return undefined;
+      }
+      const projected = projectPlanetHexCenter(center, width, height);
+      return {
+        packet,
+        x: projected.x,
+        y: projected.y,
+        radius: layout?.radius ?? centerRadius
+      };
+    })
+    .filter((projected): projected is ProjectedPlanetHex => Boolean(projected))
+    .sort((a, b) => a.y - b.y || a.x - b.x);
 }
 
 function projectWorldSectorWithLayout(sector: World["geography"]["sectors"][string], layout: WorldHexLayout): WorldSectorProjection {
@@ -2316,6 +2494,184 @@ function sectorCellColor(sector: World["geography"]["sectors"][string], x: numbe
   return rgbCss(mixRgb(color, target, Math.abs(elevationShade)), sector.kind === "ocean" ? 0.78 : 0.92);
 }
 
+function normalizedPlanetHexMetric(value: number | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value >= 0 && value <= 1) {
+    return value;
+  }
+  if (value >= 0 && value <= 100) {
+    return value / 100;
+  }
+  return clampNumber(value / 4200, 0, 1);
+}
+
+function planetHexTerrainToken(packet: UnknownRecord): string {
+  return (planetHexString(packet, ["biome", "biomeId", "kind", "terrain", "type"]) ?? "").toLowerCase();
+}
+
+function planetHexIsWater(packet: UnknownRecord): boolean {
+  const token = planetHexTerrainToken(packet);
+  const waterDepth = planetHexNumber(packet, ["waterDepth", "depth"]);
+  return Boolean((waterDepth !== undefined && waterDepth > 0) || token.includes("ocean") || token.includes("water") || token.includes("sea"));
+}
+
+function planetHexIsCoast(packet: UnknownRecord): boolean {
+  const token = planetHexTerrainToken(packet);
+  const coastMask = planetHexNumber(packet, ["coastMask"]);
+  const coastDistance = planetHexNumber(packet, ["coastDistance"]);
+  return Boolean(token.includes("coast") || (coastMask !== undefined && coastMask > 0) || (coastDistance !== undefined && coastDistance <= 1));
+}
+
+function planetHexBaseColor(packet: UnknownRecord): RgbColor {
+  const biomeId = planetHexString(packet, ["biomeId", "biome"]);
+  const biome = biomeId ? (world.planet.biomes as Record<string, { color: string } | undefined>)[biomeId] : undefined;
+  if (biome) {
+    return parseHexColor(biome.color);
+  }
+  const token = planetHexTerrainToken(packet);
+  if (planetHexIsWater(packet)) return parseHexColor("#203d45");
+  if (token.includes("coast")) return parseHexColor("#5d8b91");
+  if (token.includes("mountain") || token.includes("alpine")) return parseHexColor("#9a7c55");
+  if (token.includes("forest") || token.includes("wood")) return parseHexColor("#4f7a53");
+  if (token.includes("desert") || token.includes("dry")) return parseHexColor("#c6a64d");
+  if (token.includes("snow") || token.includes("tundra")) return parseHexColor("#d8e8df");
+  if (token.includes("swamp") || token.includes("fen") || token.includes("marsh")) return parseHexColor("#5d8b91");
+  if (token.includes("waste") || token.includes("ruin")) return parseHexColor("#8f7f8f");
+  return parseHexColor("#7d8f5b");
+}
+
+function planetHexNoiseSample(packet: UnknownRecord): { x: number; y: number; salt: number } {
+  const coord = planetHexCoord(packet);
+  const center = planetHexCenter(packet);
+  return {
+    x: coord?.q ?? center?.x ?? 0,
+    y: coord?.r ?? center?.y ?? 0,
+    salt: planetHexNumber(packet, ["moisture", "humidity", "temperature"]) ?? 0
+  };
+}
+
+function planetHexCellColor(packet: UnknownRecord, overlay: AtlasOverlay): string {
+  const water = planetHexIsWater(packet);
+  const coast = planetHexIsCoast(packet);
+  const sample = planetHexNoiseSample(packet);
+  const noise = terrainNoise(sample.x, sample.y, sample.salt);
+  if (overlay === "elevation") {
+    const elevation = normalizedPlanetHexMetric(planetHexNumber(packet, ["elevation", "elevationMeters", "height"]));
+    const band = planetHexString(packet, ["elevationBand", "heightBand"]);
+    const bandColor = parseHexColor(elevationBandBaseColor(band));
+    const low = water ? parseHexColor("#203d45") : parseHexColor("#5d8b91");
+    const high = parseHexColor("#f4ead8");
+    const base = elevation === undefined ? bandColor : mixRgb(low, high, elevation);
+    const shaded = mixRgb(base, noise > 0.52 ? high : parseHexColor("#0d100e"), Math.abs(noise - 0.52) * 0.09);
+    return rgbCss(shaded, water ? 0.84 : 0.95);
+  }
+  if (overlay === "threat") {
+    return threatScaleColor(planetHexNumber(packet, ["danger", "threat", "hazard"]) ?? (water ? 24 : 8), water ? 0.68 : 0.88);
+  }
+  if (overlay === "political") {
+    const factionId = planetHexString(packet, ["ownerFactionId", "factionId", "claimFactionId"]);
+    const factionColor = factionId ? world.factions[factionId]?.color : undefined;
+    if (water) {
+      return "rgba(32, 61, 69, 0.78)";
+    }
+    const base = parseHexColor(factionColor ?? "#7d8f5b");
+    return rgbCss(mixRgb(base, parseHexColor("#0d100e"), factionColor ? 0.16 : 0.34), factionColor ? 0.82 : 0.52);
+  }
+
+  let color = planetHexBaseColor(packet);
+  const elevation = normalizedPlanetHexMetric(planetHexNumber(packet, ["elevation", "elevationMeters", "height"])) ?? (water ? 0.08 : 0.42);
+  const elevationShade = (elevation - 0.42) * 0.18 + (noise - 0.5) * 0.07;
+  if (water) {
+    color = mixRgb(color, parseHexColor("#203d45"), 0.5);
+  } else if (coast) {
+    color = mixRgb(color, parseHexColor("#5d8b91"), 0.2);
+  }
+  const target = elevationShade >= 0 ? parseHexColor("#f4ead8") : parseHexColor("#0d100e");
+  return rgbCss(mixRgb(color, target, Math.abs(elevationShade)), water ? 0.82 : 0.94);
+}
+
+function planetHexTerrainStroke(packet: UnknownRecord, overlay: AtlasOverlay): { color: string; width: number } {
+  if (overlay === "political" && (planetHexNumber(packet, ["borderMask"]) ?? 0) > 0) {
+    return { color: "rgba(244, 234, 216, 0.2)", width: 0.55 };
+  }
+  if (planetHexIsCoast(packet)) {
+    return { color: "rgba(216, 201, 158, 0.12)", width: 0.42 };
+  }
+  if (overlay === "threat") {
+    return { color: "rgba(13, 16, 14, 0.12)", width: 0.28 };
+  }
+  return { color: planetHexIsWater(packet) ? "rgba(216, 232, 223, 0.02)" : "rgba(244, 234, 216, 0.035)", width: 0.18 };
+}
+
+function drawPlanetHexTerrainHints(context: CanvasRenderingContext2D, projected: ProjectedPlanetHex, overlay: AtlasOverlay): void {
+  const { packet, x, y, radius } = projected;
+  if (radius < 3.8) {
+    return;
+  }
+  const token = planetHexTerrainToken(packet);
+  const riverMask = planetHexNumber(packet, ["riverMask"]);
+  const roadMask = planetHexNumber(packet, ["roadMask"]);
+  const highGround = token.includes("mountain") || token.includes("ridge") || ["high", "alpine"].includes(planetHexString(packet, ["elevationBand", "heightBand"]) ?? "");
+
+  if (planetHexIsCoast(packet) && (overlay === "biomes" || overlay === "elevation")) {
+    context.beginPath();
+    context.strokeStyle = "rgba(216, 201, 158, 0.18)";
+    context.lineWidth = Math.max(0.45, radius * 0.08);
+    context.moveTo(x - radius * 0.46, y + radius * 0.28);
+    context.quadraticCurveTo(x, y + radius * 0.06, x + radius * 0.46, y + radius * 0.28);
+    context.stroke();
+  }
+  if (riverMask !== undefined && riverMask > 0 && radius >= 4.4 && overlay !== "political") {
+    context.beginPath();
+    context.strokeStyle = "rgba(120, 168, 184, 0.2)";
+    context.lineWidth = Math.max(0.5, radius * 0.08);
+    context.moveTo(x - radius * 0.48, y - radius * 0.08);
+    context.quadraticCurveTo(x - radius * 0.04, y + radius * 0.22, x + radius * 0.46, y + radius * 0.02);
+    context.stroke();
+  }
+  if (roadMask !== undefined && roadMask > 0 && radius >= 5.2 && overlay === "political") {
+    context.beginPath();
+    context.strokeStyle = "rgba(238, 226, 196, 0.18)";
+    context.lineWidth = Math.max(0.45, radius * 0.07);
+    context.moveTo(x - radius * 0.5, y);
+    context.lineTo(x + radius * 0.5, y);
+    context.stroke();
+  }
+  if (highGround && radius >= 5.4 && overlay !== "threat") {
+    context.beginPath();
+    context.strokeStyle = "rgba(244, 234, 216, 0.16)";
+    context.lineWidth = Math.max(0.45, radius * 0.07);
+    context.moveTo(x - radius * 0.34, y + radius * 0.22);
+    context.lineTo(x - radius * 0.08, y - radius * 0.18);
+    context.lineTo(x + radius * 0.16, y + radius * 0.18);
+    context.stroke();
+  }
+}
+
+function drawDensePlanetHexTerrainLayer(context: CanvasRenderingContext2D, snapshot: RenderSnapshot, width: number, height: number, overlay: AtlasOverlay): boolean {
+  const projectedHexes = projectedPlanetHexes(snapshot, width, height);
+  if (projectedHexes.length === 0) {
+    return false;
+  }
+  const globeRadius = planetRadius(width, height);
+  const centerX = width * 0.5;
+  const centerY = height * 0.51;
+  context.save();
+  for (const projected of projectedHexes) {
+    const distance = Math.hypot(projected.x - centerX, projected.y - centerY);
+    if (distance > globeRadius + projected.radius * 0.65) {
+      continue;
+    }
+    const stroke = planetHexTerrainStroke(projected.packet, overlay);
+    drawTerrainHexCell(context, projected.x, projected.y, projected.radius * 1.02, planetHexCellColor(projected.packet, overlay), stroke.color, 0, stroke.width);
+    drawPlanetHexTerrainHints(context, projected, overlay);
+  }
+  context.restore();
+  return true;
+}
+
 function worldTerrainStroke(sector: World["geography"]["sectors"][string], overlay: AtlasOverlay): { color: string; width: number } {
   if (overlay === "political") {
     return {
@@ -2377,6 +2733,27 @@ function drawWorldTerrainWash(context: CanvasRenderingContext2D, projectedSector
   context.restore();
 }
 
+function drawSectorWorldTerrainLayer(context: CanvasRenderingContext2D, projectedSectors: readonly WorldSectorProjection[], overlay: AtlasOverlay): void {
+  drawWorldTerrainWash(context, projectedSectors, overlay);
+
+  for (const projected of projectedSectors) {
+    const { sector, x, y, radius } = projected;
+    const lift = 0;
+    const stroke = worldTerrainStroke(sector, overlay);
+    drawTerrainHexCell(
+      context,
+      x,
+      y,
+      radius * (overlay === "biomes" || overlay === "elevation" ? 0.997 : 1.003),
+      sectorCellColor(sector, sector.x, sector.y, overlay),
+      stroke.color,
+      lift,
+      stroke.width
+    );
+    drawSectorTileAdornments(context, sector, x, y, Math.sqrt(3) * radius, radius * 2, lift, "world");
+  }
+}
+
 function drawPlanetLightOverlay(context: CanvasRenderingContext2D, width: number, height: number): void {
   const day = timeOfDay();
   const globeRadius = planetRadius(width, height);
@@ -2406,7 +2783,7 @@ function clipToPlanet(context: CanvasRenderingContext2D, width: number, height: 
   context.clip();
 }
 
-function drawWorldTerrainField(context: CanvasRenderingContext2D, width: number, height: number, overlay: AtlasOverlay): void {
+function drawWorldTerrainField(context: CanvasRenderingContext2D, width: number, height: number, overlay: AtlasOverlay, snapshot?: RenderSnapshot): void {
   drawWorldBackdrop(context, width, height);
   const globeRadius = planetRadius(width, height);
   const centerX = width * 0.5;
@@ -2421,24 +2798,8 @@ function drawWorldTerrainField(context: CanvasRenderingContext2D, width: number,
   context.fillStyle = ocean;
   context.fillRect(centerX - globeRadius, centerY - globeRadius, globeRadius * 2, globeRadius * 2);
 
-  const projectedSectors = projectedWorldSectors(width, height);
-  drawWorldTerrainWash(context, projectedSectors, overlay);
-
-  for (const projected of projectedSectors) {
-    const { sector, x, y, radius } = projected;
-    const lift = 0;
-    const stroke = worldTerrainStroke(sector, overlay);
-    drawTerrainHexCell(
-      context,
-      x,
-      y,
-      radius * (overlay === "biomes" || overlay === "elevation" ? 0.997 : 1.003),
-      sectorCellColor(sector, sector.x, sector.y, overlay),
-      stroke.color,
-      lift,
-      stroke.width
-    );
-    drawSectorTileAdornments(context, sector, x, y, Math.sqrt(3) * radius, radius * 2, lift, "world");
+  if (!snapshot || !drawDensePlanetHexTerrainLayer(context, snapshot, width, height, overlay)) {
+    drawSectorWorldTerrainLayer(context, projectedWorldSectors(width, height), overlay);
   }
 
   context.save();
@@ -3742,7 +4103,7 @@ function renderMap(): void {
     return;
   }
 
-  drawWorldTerrainField(context, width, height, atlasOverlay);
+  drawWorldTerrainField(context, width, height, atlasOverlay, snapshot);
   drawWorldBodies(context, labels, width, height);
   context.save();
   clipToPlanet(context, width, height);

@@ -9,6 +9,7 @@ import { classifyRelationStance, deriveLoyaltyState, derivePersonEmotionalState 
 import { summarizeBandEmotionalClimate } from "../src/sim/society/emotionalClimate";
 import { createWardFromConquest } from "../src/sim/society/family";
 import { collectTelemetry, validateWorld } from "../src/sim/telemetry";
+import { createPlanetHexGrid } from "../src/sim/environment/planetHexGrid";
 import { deriveWorldClock, TICKS_PER_DAY, TICKS_PER_HOUR } from "../src/sim/world/calendar";
 import {
   advanceSettlementConstruction,
@@ -523,6 +524,104 @@ results.push(
     assertValid(world, "world render snapshot stability scenario");
 
     return `world snapshot sectors ${snapshot.sectors.length}; tiles ${snapshot.tiles.length}; routes ${snapshot.routes.length}`;
+  })
+);
+
+results.push(
+  scenario("dense planet grid is read-only coherent and deterministic", () => {
+    const world = createWorld("micro-dense-planet-hex-grid");
+    const sectorCount = Object.keys(world.geography.sectors).length;
+    const before = JSON.stringify(world);
+    const grid = createPlanetHexGrid(world);
+    const repeat = createPlanetHexGrid(world);
+    const after = JSON.stringify(world);
+    const uniqueIds = new Set(grid.tiles.map((tile) => tile.id));
+    const uniqueCoords = new Set(grid.tiles.map((tile) => `${tile.q},${tile.r}`));
+    const invalidTiles = grid.tiles.filter(
+      (tile) =>
+        !tile.id ||
+        !Number.isInteger(tile.q) ||
+        !Number.isInteger(tile.r) ||
+        !Number.isFinite(tile.x) ||
+        tile.x < -0.001 ||
+        tile.x > 1.001 ||
+        !Number.isFinite(tile.y) ||
+        tile.y < -0.001 ||
+        tile.y > 1.001 ||
+        !Number.isFinite(tile.radialDistance) ||
+        tile.radialDistance < -0.001 ||
+        tile.radialDistance > 1.001 ||
+        tile.neighborIds.length !== tile.neighborCoords.length
+    );
+    const summarize = (candidate: typeof grid): string => {
+      const counts = (values: readonly string[]): [string, number][] => {
+        const byValue: Record<string, number> = {};
+        for (const value of values) {
+          byValue[value] = (byValue[value] ?? 0) + 1;
+        }
+        return Object.entries(byValue).sort((left, right) => left[0].localeCompare(right[0]));
+      };
+      return JSON.stringify({
+        radius: candidate.radius,
+        tileCount: candidate.tileCount,
+        source: candidate.source,
+        kinds: counts(candidate.tiles.map((tile) => tile.kind)),
+        biomes: counts(candidate.tiles.map((tile) => tile.biomeId)),
+        center: candidate.byCoord["0,0"],
+        samples: candidate.tiles
+          .filter((tile) => tile.q === 0 || tile.r === 0 || tile.q + tile.r === 0)
+          .slice(0, 12)
+          .map((tile) => `${tile.id}:${tile.kind}:${tile.biomeId}:${tile.neighborIds.length}`)
+      });
+    };
+
+    let checkedNeighborRefs = 0;
+    let resolvedNeighborRefs = 0;
+    let abruptKindIssues = 0;
+    let biomeIssues = 0;
+    const centerishTiles = grid.tiles.filter((tile) => tile.radialDistance <= 0.82);
+    for (const tile of centerishTiles) {
+      for (const neighborId of tile.neighborIds) {
+        checkedNeighborRefs += 1;
+        const neighbor = grid.byId[neighborId];
+        if (!neighbor) {
+          continue;
+        }
+        resolvedNeighborRefs += 1;
+        if (tile.id.localeCompare(neighbor.id) > 0) {
+          continue;
+        }
+        if ((tile.kind === "ocean" && neighbor.kind === "continent") || (tile.kind === "continent" && neighbor.kind === "ocean")) {
+          abruptKindIssues += 1;
+        }
+        const sampledOverlap = tile.sampledSectorIds.some((sectorId) => neighbor.sampledSectorIds.includes(sectorId));
+        if (tile.kind === neighbor.kind && tile.kind !== "ocean" && tile.biomeId !== neighbor.biomeId && !sampledOverlap) {
+          biomeIssues += 1;
+        }
+      }
+    }
+
+    assert(after === before, "Expected dense planet grid generation not to mutate world.");
+    assert(grid.source.sectorCount === sectorCount, `Expected source sector count ${sectorCount}, got ${grid.source.sectorCount}.`);
+    assert(grid.tileCount >= grid.radius * grid.radius * 2, `Expected radius ${grid.radius} globe grid to be planet-filling, got ${grid.tileCount} hexes.`);
+    assert(grid.tileCount <= grid.radius * grid.radius * 5, `Expected radius ${grid.radius} globe grid to stay bounded, got ${grid.tileCount} hexes.`);
+    assert(grid.tiles.length === grid.tileCount, "Expected grid tileCount to match tile array length.");
+    assert(Object.keys(grid.byId).length === grid.tileCount, "Expected byId to cover every dense planet hex.");
+    assert(Object.keys(grid.byCoord).length === grid.tileCount, "Expected byCoord to cover every dense planet hex.");
+    assert(uniqueIds.size === grid.tileCount, "Expected dense planet hex ids to be unique.");
+    assert(uniqueCoords.size === grid.tileCount, "Expected dense planet hex coords to be unique.");
+    assert(grid.tileCount > sectorCount * 8, `Expected dense planet grid to have many more tiles than ${sectorCount} sectors, got ${grid.tileCount}.`);
+    assert(grid.byCoord["0,0"], "Expected dense planet grid to include a center hex.");
+    assert(invalidTiles.length === 0, `Expected every planet hex to have id, coord, in-disc normalized position, and aligned neighbor data; bad ${invalidTiles.length}.`);
+    assert(centerishTiles.length > sectorCount, "Expected center-ish planet grid sample to be denser than sectors.");
+    assert(checkedNeighborRefs > 0, "Expected dense planet grid to expose neighbor ids.");
+    assert(resolvedNeighborRefs >= Math.floor(checkedNeighborRefs * 0.98), `Expected most neighbor ids to resolve, got ${resolvedNeighborRefs}/${checkedNeighborRefs}.`);
+    assert(abruptKindIssues <= Math.max(2, Math.ceil(resolvedNeighborRefs * 0.02)), `Expected coast/ocean/land transitions to be coherent, got ${abruptKindIssues} abrupt kind issues.`);
+    assert(biomeIssues <= Math.max(8, Math.ceil(resolvedNeighborRefs * 0.18)), `Expected adjacent biome transitions to be bounded, got ${biomeIssues} issues.`);
+    assert(summarize(grid) === summarize(repeat), "Expected dense planet grid summary to be deterministic for the same seed.");
+    assertValid(world, "dense planet grid scenario");
+
+    return `${grid.tileCount} hexes/${sectorCount} sectors; neighbors ${resolvedNeighborRefs}/${checkedNeighborRefs}; kind issues ${abruptKindIssues}; biome issues ${biomeIssues}`;
   })
 );
 

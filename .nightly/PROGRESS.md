@@ -15,6 +15,17 @@ Repo: `C:\dev\godwatch`
 
 ## Runs
 
+## Run 2026-05-28T01:11:15Z
+- Branch / HEAD: nightly/godwatch-legibility / 75ba968
+- Tranche / slice: T2 dense planet-filling hex terrain substrate
+- Status: DONE
+- Tests: npm run check -> PASS; browser check at http://127.0.0.1:5173 -> PASS
+- Commit: recorded in this commit; pushed: yes (`origin/nightly/godwatch-legibility`)
+- Lanes: systems=done, visual=done, micro=done
+- Files touched: `.nightly/PROGRESS.md`, `src/sim/environment/planetHexGrid.ts`, `src/view/snapshot.ts`, `src/main.ts`, `scripts/micro-scenarios-entry.ts`
+- Next run: Use the dense planet hexes for hover/hit-test and map labels, then derive coast/river/road/border masks so terrain joins read cleanly at world and region zoom.
+- Blockers: none.
+
 ## Run 2026-05-28T00:44:50Z
 - Branch / HEAD: nightly/godwatch-legibility / 6fc1f6b
 - Tranche / slice: T2 map-first world terrain wash and world snapshot proof
