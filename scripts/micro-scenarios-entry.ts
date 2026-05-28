@@ -5,6 +5,7 @@ import { Rng } from "../src/sim/core/rng";
 import { deriveAlloyProfile, deriveMaterialItemAdjustments, ensureItemMaterialProfile, ensureItemPowerCell, ensurePersonResources } from "../src/sim/economy/power";
 import { computeAugmentationEffects, deriveInjuryBurden, installAugmentation, payAugmentationUpkeep, tickAugmentations } from "../src/sim/individuals/augmentations";
 import { attemptMindCompulsion, teachAbility, tickInfluenceState } from "../src/sim/individuals/influence";
+import { createLocalGameplayFixture, localTileId, submitLocalCommand, summarizeLocalGameState, tickLocalGame, validateLocalGameState } from "../src/sim/local";
 import { classifyRelationStance, deriveLoyaltyState, derivePersonEmotionalState } from "../src/sim/individuals/moods";
 import { summarizeBandEmotionalClimate } from "../src/sim/society/emotionalClimate";
 import { createWardFromConquest } from "../src/sim/society/family";
@@ -444,6 +445,50 @@ results.push(
     assert(telemetry.invariantIssues.length === 0, `Expected telemetry-clean local map repair world:\n${telemetry.invariantIssues.join("\n")}`);
     assertValid(world, "settlement local map repair scenario");
     return `${settlement.name}: ${map.kind} ${map.width}x${map.height}; repaired ${person.name} to ${person.localTileId}`;
+  })
+);
+
+results.push(
+  scenario("local gameplay command builds through pawn labor", () => {
+    function runFixture(): { stateSummary: string; eventKinds: string[] } {
+      const state = createLocalGameplayFixture("micro-local-gameplay");
+      const buildTileId = localTileId(7, 6);
+      submitLocalCommand(state, {
+        id: "cmd-build-hut",
+        playerId: "player-god",
+        issuedTick: state.tick,
+        applyAtTick: state.tick,
+        kind: "designate-build",
+        payload: {
+          tileId: buildTileId,
+          buildingKind: "hut"
+        }
+      });
+
+      tickLocalGame(state, 40);
+      const issues = validateLocalGameState(state);
+      assert(issues.length === 0, `Expected local gameplay state to validate:\n${issues.join("\n")}`);
+
+      const tile = state.tiles[buildTileId];
+      assert(tile?.building?.kind === "hut", "Expected pawn-completed hut on designated tile.");
+      assert(state.commandQueue.length === 0, "Expected command queue to apply at tick boundary.");
+      assert(Object.values(state.jobs).some((job) => job.kind === "haul" && job.status === "done"), "Expected a completed haul job.");
+      assert(Object.values(state.jobs).some((job) => job.kind === "build" && job.status === "done"), "Expected a completed build job.");
+      assert(Object.values(state.reservations).length === 0, "Expected completed jobs to release reservations.");
+      const pawn = state.pawns["pawn-builder"];
+      assert(pawn?.xp.hauling && pawn.xp.hauling > 0, "Expected hauling XP from delivered materials.");
+      assert(pawn.xp.construction > 0, "Expected construction XP from building work.");
+      const eventKinds = state.events.map((eventEntry) => eventEntry.kind);
+      assert(eventKinds.includes("resource.delivered"), "Expected resource delivery event.");
+      assert(eventKinds.includes("build.complete"), "Expected build completion event.");
+      return { stateSummary: summarizeLocalGameState(state), eventKinds };
+    }
+
+    const first = runFixture();
+    const repeat = runFixture();
+    assert(first.stateSummary === repeat.stateSummary, "Expected deterministic local gameplay summary for repeated seed and commands.");
+    assert(JSON.stringify(first.eventKinds) === JSON.stringify(repeat.eventKinds), "Expected deterministic local event ordering.");
+    return first.stateSummary;
   })
 );
 
