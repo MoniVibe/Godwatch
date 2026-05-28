@@ -504,6 +504,29 @@ results.push(
 );
 
 results.push(
+  scenario("world render snapshot carries terrain and routes read-only", () => {
+    const world = createWorld("micro-world-render-snapshot-stability");
+    const before = JSON.stringify(world);
+    const snapshot = createRenderSnapshot(world, { mode: "world", overlay: "biomes" });
+    const repeat = createRenderSnapshot(world, { mode: "world", overlay: "biomes" });
+    const after = JSON.stringify(world);
+
+    assert(after === before, "Expected world render snapshot creation not to mutate world.");
+    assert(JSON.stringify(snapshotDebugSummary(snapshot)) === JSON.stringify(snapshotDebugSummary(repeat)), "Expected stable world snapshot summary for the same world state.");
+    assert(snapshot.camera.mode === "world" && snapshot.camera.overlay === "biomes", "Expected requested world snapshot camera state.");
+    assert(snapshot.sectors.length === Object.keys(world.geography.sectors).length, "Expected world snapshot to include all sectors.");
+    assert(snapshot.tiles.length === Object.keys(world.geography.tiles).length, "Expected world snapshot to include all tiles.");
+    assert(snapshot.routes.length === Object.keys(world.planet.routes).length, "Expected world snapshot to include all routes.");
+    assert(snapshot.sectors.length > 0, "Expected world snapshot sectors.");
+    assert(snapshot.tiles.length > 0, "Expected world snapshot tiles.");
+    assert(snapshot.routes.length > 0, "Expected world snapshot routes.");
+    assertValid(world, "world render snapshot stability scenario");
+
+    return `world snapshot sectors ${snapshot.sectors.length}; tiles ${snapshot.tiles.length}; routes ${snapshot.routes.length}`;
+  })
+);
+
+results.push(
   scenario("world clock uses 360 ticks per day", () => {
     const dawn = deriveWorldClock(0);
     const hourOne = deriveWorldClock(TICKS_PER_HOUR);

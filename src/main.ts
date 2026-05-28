@@ -2316,6 +2316,25 @@ function sectorCellColor(sector: World["geography"]["sectors"][string], x: numbe
   return rgbCss(mixRgb(color, target, Math.abs(elevationShade)), sector.kind === "ocean" ? 0.78 : 0.92);
 }
 
+function worldTerrainStroke(sector: World["geography"]["sectors"][string], overlay: AtlasOverlay): { color: string; width: number } {
+  if (overlay === "political") {
+    return {
+      color: sector.kind === "ocean" ? "rgba(216, 232, 223, 0.08)" : "rgba(244, 234, 216, 0.16)",
+      width: sector.kind === "ocean" ? 0.45 : 0.75
+    };
+  }
+  if (overlay === "threat") {
+    return {
+      color: "rgba(13, 16, 14, 0.18)",
+      width: 0.7
+    };
+  }
+  return {
+    color: sector.kind === "ocean" ? "rgba(216, 232, 223, 0.035)" : "rgba(244, 234, 216, 0.06)",
+    width: 0.35
+  };
+}
+
 function drawTerrainHexCell(context: CanvasRenderingContext2D, x: number, y: number, radius: number, fill: string, stroke: string, lift: number, lineWidth: number): void {
   context.beginPath();
   for (let index = 0; index < 6; index += 1) {
@@ -2334,6 +2353,28 @@ function drawTerrainHexCell(context: CanvasRenderingContext2D, x: number, y: num
   context.lineWidth = lineWidth;
   context.fill();
   context.stroke();
+}
+
+function drawWorldTerrainWash(context: CanvasRenderingContext2D, projectedSectors: readonly WorldSectorProjection[], overlay: AtlasOverlay): void {
+  context.save();
+  context.globalCompositeOperation = "source-over";
+  for (const projected of projectedSectors) {
+    const { sector, x, y, radius } = projected;
+    context.globalAlpha = sector.kind === "ocean" ? 0.2 : sector.kind === "coast" ? 0.58 : 0.72;
+    drawTerrainHexCell(context, x, y, radius * 1.36, sectorCellColor(sector, sector.x, sector.y, overlay), "rgba(0, 0, 0, 0)", 0, 0);
+  }
+  context.restore();
+
+  context.save();
+  context.globalAlpha = overlay === "biomes" || overlay === "elevation" ? 0.24 : 0.1;
+  for (const projected of projectedSectors) {
+    const { sector, x, y, radius } = projected;
+    if (sector.kind !== "coast" && sector.kind !== "island") {
+      continue;
+    }
+    drawTerrainHexCell(context, x, y, radius * 1.18, "rgba(0, 0, 0, 0)", "rgba(216, 201, 158, 0.42)", 0, 1.25);
+  }
+  context.restore();
 }
 
 function drawPlanetLightOverlay(context: CanvasRenderingContext2D, width: number, height: number): void {
@@ -2380,18 +2421,22 @@ function drawWorldTerrainField(context: CanvasRenderingContext2D, width: number,
   context.fillStyle = ocean;
   context.fillRect(centerX - globeRadius, centerY - globeRadius, globeRadius * 2, globeRadius * 2);
 
-  for (const projected of projectedWorldSectors(width, height)) {
+  const projectedSectors = projectedWorldSectors(width, height);
+  drawWorldTerrainWash(context, projectedSectors, overlay);
+
+  for (const projected of projectedSectors) {
     const { sector, x, y, radius } = projected;
     const lift = 0;
+    const stroke = worldTerrainStroke(sector, overlay);
     drawTerrainHexCell(
       context,
       x,
       y,
-      radius * 1.003,
+      radius * (overlay === "biomes" || overlay === "elevation" ? 0.997 : 1.003),
       sectorCellColor(sector, sector.x, sector.y, overlay),
-      sector.kind === "ocean" ? "rgba(216, 232, 223, 0.14)" : "rgba(13, 16, 14, 0.36)",
+      stroke.color,
       lift,
-      sector.kind === "ocean" ? 0.7 : 0.95
+      stroke.width
     );
     drawSectorTileAdornments(context, sector, x, y, Math.sqrt(3) * radius, radius * 2, lift, "world");
   }

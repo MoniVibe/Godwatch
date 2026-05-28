@@ -15,6 +15,17 @@ Repo: `C:\dev\godwatch`
 
 ## Runs
 
+## Run 2026-05-28T00:44:50Z
+- Branch / HEAD: nightly/godwatch-legibility / 6fc1f6b
+- Tranche / slice: T2 map-first world terrain wash and world snapshot proof
+- Status: DONE
+- Tests: npm run check -> PASS; browser check at http://127.0.0.1:5173 -> PASS
+- Commit: recorded in this commit; pushed: yes (`origin/nightly/godwatch-legibility`)
+- Lanes: systems=none, visual=done, micro=done
+- Files touched: `.nightly/PROGRESS.md`, `src/main.ts`, `scripts/micro-scenarios-entry.ts`
+- Next run: Continue `world.md` Lane 1 by filling the planet with a denser coherent terrain field, reducing label/effect clutter, or moving tile grammar toward `src/render/*`.
+- Blockers: none.
+
 ## Run 2026-05-28T00:31:10Z
 - Branch / HEAD: nightly/godwatch-legibility / 77b02d7
 - Tranche / slice: Nightly prompt now includes `C:\dev\plans\world.md` as the map-first visual north star
